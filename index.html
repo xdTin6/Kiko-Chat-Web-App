@@ -104,8 +104,6 @@ async function uploadAndSendFile(file){
       deliveredBy:{[state.currentUser.name]:true},seenBy:{}};
     await push(roomRef,msg);
   };
-  // Note: Using Data URLs is simple but inefficient for large files.
-  // For a production app, Firebase Storage is the recommended approach.
   reader.readAsDataURL(file);
 }
 
@@ -259,78 +257,86 @@ window.Kiko = {
 <style>
 /* --- Global Styles & Variables --- */
 :root {
-  --background-dark: #121212;
-  --panel-bg: #1e1e1e;
-  --panel-border: #2c2c2c;
-  --text-primary: #e0e0e0;
-  --text-secondary: #a0a0a0;
-  --accent-color: #0277bd;
-  --accent-hover: #039be5;
-  --my-bubble-bg: #0277bd;
-  --other-bubble-bg: #373737;
-  --online-indicator: #4caf50;
+  --background-dark: #0d1117;
+  --panel-bg: #161b22;
+  --panel-border: #30363d;
+  --text-primary: #e6edf3;
+  --text-secondary: #7d8590;
+  --accent-color: #2f81f7;
+  --accent-hover: #58a6ff;
+  --my-bubble-bg: #224368;
+  --other-bubble-bg: #21262d;
+  --online-indicator: #238636;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
-html, body { height: 100%; overflow: hidden; background-color: var(--background-dark); color: var(--text-primary); }
+html, body { height: 100%; overflow: hidden; background-color: var(--background-dark); color: var(--text-primary); font-size: clamp(14px, 1.2vw, 15px); }
 
 /* --- Login View --- */
 #loginView { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
-.loginCard { background: var(--panel-bg); padding: 32px; width: 90%; max-width: 360px; border-radius: 16px; text-align: center; border: 1px solid var(--panel-border); }
-.logoWrap { display: flex; align-items: center; gap: 12px; justify-content: center; margin-bottom: 24px; }
-.logoCat { width: 50px; height: 50px; border-radius: 16px; background: var(--accent-color); display: flex; align-items: center; justify-content: center; font-size: 28px; }
-.logoText { font-size: 24px; font-weight: 700; }
-.loginCard input { width: 100%; padding: 12px 14px; margin: 8px 0; border: 1px solid var(--panel-border); border-radius: 10px; background: var(--background-dark); color: var(--text-primary); font-size: 15px; outline: none; }
+.loginCard { background: var(--panel-bg); padding: clamp(24px, 5vw, 32px); width: 90%; max-width: 350px; border-radius: 12px; text-align: center; border: 1px solid var(--panel-border); }
+.logoWrap { display: flex; align-items: center; gap: 10px; justify-content: center; margin-bottom: 20px; }
+.logoCat { width: 44px; height: 44px; border-radius: 12px; background: var(--accent-color); display: flex; align-items: center; justify-content: center; font-size: 24px; }
+.logoText { font-size: 22px; font-weight: 600; }
+.loginCard input { width: 100%; padding: 10px 12px; margin: 8px 0; border: 1px solid var(--panel-border); border-radius: 8px; background: var(--background-dark); color: var(--text-primary); outline: none; }
 .loginCard input:focus { border-color: var(--accent-color); }
-.loginCard button { margin-top: 12px; width: 100%; padding: 12px; border: none; border-radius: 10px; background: var(--accent-color); color: #fff; font-weight: 600; font-size: 15px; cursor: pointer; transition: background-color 0.2s; }
+.loginCard button { margin-top: 10px; width: 100%; padding: 10px; border: none; border-radius: 8px; background: var(--accent-color); color: #fff; font-weight: 600; cursor: pointer; transition: background-color 0.2s; }
 .loginCard button:hover { background: var(--accent-hover); }
 
 /* --- Main Chat View (Desktop) --- */
-#mainView { width: 100%; height: 100%; display: grid; grid-template-columns: 320px 1fr; }
+#mainView { width: 100%; height: 100%; display: grid; grid-template-columns: clamp(280px, 25vw, 340px) 1fr; }
 .leftPanel, .rightPanel { display: flex; flex-direction: column; background: var(--panel-bg); height: 100%; }
 .leftPanel { border-right: 1px solid var(--panel-border); }
-.panelHeader { padding: 12px 16px; border-bottom: 1px solid var(--panel-border); display: flex; align-items: center; gap: 12px; font-weight: 600; }
-.panelHeader .logoCat { width: 40px; height: 40px; font-size: 24px; border-radius: 12px; }
+.panelHeader { padding: 10px 14px; border-bottom: 1px solid var(--panel-border); display: flex; align-items: center; gap: 10px; font-weight: 600; }
+.panelHeader .logoCat { width: 36px; height: 36px; font-size: 20px; border-radius: 10px; }
 .panelHeader .logoText { font-size: 18px; }
-#usersList { flex: 1; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 4px; }
-.userItem { display: flex; align-items: center; gap: 12px; padding: 10px; border-radius: 10px; cursor: pointer; transition: background-color 0.2s; }
-.userItem:hover, .userItem.active { background: rgba(255, 255, 255, 0.05); }
-.miniAvatar { width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-weight: 700; color: #fff; }
+#usersList { flex: 1; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; }
+.userItem { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-radius: 8px; cursor: pointer; transition: background-color 0.2s; }
+.userItem:hover { background: rgba(255, 255, 255, 0.05); }
+.miniAvatar { width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-weight: 600; color: #fff; }
 .userInfo { flex: 1; }
-.userName { font-weight: 600; }
-.userStatus { font-size: 13px; color: var(--text-secondary); }
-.userStatus:is(:has-text("online")) { color: var(--online-indicator); } /* CSS4, might not be fully supported */
-.userItem:has(.userStatus:is(:has-text("online"))) .userName { color: var(--online-indicator); } /* same */
+.userName { font-weight: 500; }
+.userStatus { font-size: 0.85em; color: var(--text-secondary); }
+.userStatus:first-letter { text-transform: uppercase; }
 
 /* Admin Panel */
-#adminPanel { flex-wrap: wrap; gap: 8px; padding: 12px; border-top: 1px solid var(--panel-border); background: var(--background-dark); }
-#adminPanel input { flex: 1 1 100px; padding: 8px; border-radius: 8px; border: 1px solid var(--panel-border); background: var(--panel-bg); color: var(--text-primary); }
-#adminPanel button { padding: 8px 12px; border-radius: 8px; border: none; cursor: pointer; font-weight: 500; background: #444; color: #fff; }
-#adminPanel button:hover { background: #555; }
+#adminPanel { flex-wrap: wrap; gap: 8px; padding: 10px; border-top: 1px solid var(--panel-border); background: var(--background-dark); }
+#adminPanel input { flex: 1 1 100px; padding: 8px; border-radius: 6px; border: 1px solid var(--panel-border); background: var(--panel-bg); color: var(--text-primary); font-size: 0.9em; }
+#adminPanel button { padding: 8px 10px; border-radius: 6px; border: none; cursor: pointer; font-weight: 500; background: #333; color: #fff; font-size: 0.9em; }
 #adminPanel button:last-of-type { background: #c62828; }
 
 /* Right Panel (Chat Area) */
-.topbar { padding: 0 16px; height: 60px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--panel-border); flex-shrink: 0; }
-#backToUsersBtn { display: none; background: none; border: none; color: var(--text-primary); font-size: 24px; cursor: pointer; margin-right: 12px; }
-#meInfo strong { font-size: 16px; }
-#meInfo span { color: var(--text-secondary); font-size: 13px; margin-left: 4px; }
-#logoutBtn { background: #c62828; padding: 8px 14px; border-radius: 8px; border: none; color: #fff; cursor: pointer; }
-#messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 4px; background-image: url('https://i.imgur.com/fXEo5vW.png'); background-size: 412.5px 749.25px; }
-.msgRow { display: flex; max-width: 75%; margin-bottom: 12px; }
+.topbar { padding: 0 clamp(8px, 2vw, 16px); height: 55px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--panel-border); flex-shrink: 0; }
+#backToUsersBtn { display: none; background: none; border: none; color: var(--text-primary); font-size: 22px; cursor: pointer; margin-right: 10px; }
+#meInfo strong { font-size: 1.1em; }
+#meInfo span { color: var(--text-secondary); font-size: 0.8em; margin-left: 4px; }
+#logoutBtn { background: #c62828; padding: 6px 12px; border-radius: 6px; border: none; color: #fff; cursor: pointer; }
+#messages { 
+  flex: 1; 
+  overflow-y: auto; 
+  padding: clamp(8px, 2vw, 16px);
+  display: flex; 
+  flex-direction: column; 
+  gap: 4px; 
+  background-image: url('https://i.imgur.com/fXEo5vW.png'); 
+  background-position: center;
+  background-size: cover;
+  background-attachment: fixed;
+}
+.msgRow { display: flex; max-width: 75%; margin-bottom: 10px; }
 .msgRow.me { align-self: flex-end; }
 .msgRow.other { align-self: flex-start; }
-.bubble { padding: 8px 12px; border-radius: 18px; color: var(--text-primary); max-width: 100%; word-wrap: break-word; }
+.bubble { padding: 6px 12px; border-radius: 16px; color: var(--text-primary); max-width: 100%; word-wrap: break-word; }
 .msgRow.me .bubble { background: var(--my-bubble-bg); border-bottom-right-radius: 4px; }
 .msgRow.other .bubble { background: var(--other-bubble-bg); border-bottom-left-radius: 4px; }
-.bubble .meta { font-size: 12px; opacity: 0.8; }
-.bubble .meta.name { font-weight: 600; margin-bottom: 4px; }
-.bubble .meta.footer { text-align: right; margin-top: 6px; }
-.bubble .text { font-size: 15px; line-height: 1.4; white-space: pre-wrap; }
-.chat-media { max-width: 100%; border-radius: 12px; margin-top: 6px; }
-.ticks { margin-left: 6px; font-size: 14px; font-weight: bold; }
-.composer { display: flex; gap: 10px; align-items: center; padding: 12px; border-top: 1px solid var(--panel-border); flex-shrink: 0; }
-.composer input[type="text"] { flex: 1; padding: 12px 16px; border: none; border-radius: 22px; background: var(--other-bubble-bg); color: var(--text-primary); font-size: 15px; outline: none; }
-.composer button { width: 44px; height: 44px; border: none; border-radius: 50%; background: var(--accent-color); color: #fff; font-weight: 600; cursor: pointer; transition: background-color 0.2s; font-size: 20px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
-.composer button:hover { background: var(--accent-hover); }
+.bubble .meta { font-size: 0.8em; opacity: 0.8; }
+.bubble .meta.name { font-weight: 600; margin-bottom: 3px; }
+.bubble .meta.footer { text-align: right; margin-top: 5px; }
+.bubble .text { line-height: 1.4; white-space: pre-wrap; }
+.chat-media { max-width: 100%; border-radius: 10px; margin-top: 5px; }
+.ticks { margin-left: 5px; font-size: 1.1em; font-weight: bold; }
+.composer { display: flex; gap: 8px; align-items: center; padding: clamp(8px, 2vw, 12px); border-top: 1px solid var(--panel-border); flex-shrink: 0; }
+.composer input[type="text"] { flex: 1; padding: 10px 14px; border: none; border-radius: 20px; background: var(--other-bubble-bg); color: var(--text-primary); outline: none; }
+.composer button { width: 40px; height: 40px; border: none; border-radius: 50%; background: var(--accent-color); color: #fff; font-size: 18px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; cursor: pointer; }
 
 /* --- Mobile Responsive Design --- */
 @media(max-width: 768px) {
@@ -342,6 +348,11 @@ html, body { height: 100%; overflow: hidden; background-color: var(--background-
   body.show-chat-panel .rightPanel { transform: translateX(0); }
   .topbar { padding: 0 8px 0 0; }
   #backToUsersBtn { display: block; }
+}
+@media (max-width: 768px) and (orientation: landscape) {
+    .composer { padding: 6px 8px; } /* Make composer smaller in landscape */
+    .composer input[type="text"] { padding: 8px 14px; }
+    .composer button { width: 36px; height: 36px; }
 }
 </style>
 </head>
