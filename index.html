@@ -69,13 +69,13 @@
 
   <!-- Firebase (ES modules from CDN) -->
   <script type="module">
-    /* ======== 1) CONFIGURE YOUR PIN (client-side gate; not real security) ======== */
-    const PIN = "8190"; // <-- change this
+    /* ======== 1) CONFIGURE YOUR PIN ======== */
+    const PIN = "8190"; // ✅ fixed here
 
-    /* ======== 2) Your Firebase config (you pasted this) ======== */
+    /* ======== 2) Firebase config ======== */
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-app.js";
     import {
-      getDatabase, ref, push, onChildAdded, query, limitToLast, serverTimestamp, update
+      getDatabase, ref, push, onChildAdded, query, limitToLast
     } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-database.js";
 
     const firebaseConfig = {
@@ -105,8 +105,7 @@
 
     /* ======== 4) Lock screen logic ======== */
     function unlockIfRemembered() {
-      const ok = localStorage.getItem("chat_pin_ok") === "1";
-      if (ok) showApp();
+      if (localStorage.getItem("chat_pin_ok") === "1") showApp();
     }
     function showApp() {
       $lock.classList.add("hidden");
@@ -131,19 +130,14 @@
     });
     unlockIfRemembered();
 
-    /* ======== 5) Chat logic (Realtime Database) ======== */
-    // Room path in DB (you can change "room1" to any word)
+    /* ======== 5) Chat logic ======== */
     const roomRef = ref(db, "rooms/room1/messages");
 
     function fmt(ts){
-      try {
-        return new Intl.DateTimeFormat(undefined, {
-          year:"2-digit", month:"2-digit", day:"2-digit",
-          hour:"2-digit", minute:"2-digit"
-        }).format(new Date(ts));
-      } catch {
-        return "";
-      }
+      return new Intl.DateTimeFormat(undefined, {
+        year:"2-digit", month:"2-digit", day:"2-digit",
+        hour:"2-digit", minute:"2-digit"
+      }).format(new Date(ts));
     }
 
     function renderMessage(msg, myName) {
@@ -168,8 +162,7 @@
 
     // Live stream last 200 messages
     onChildAdded(query(roomRef, limitToLast(200)), snap => {
-      const data = snap.val() || {};
-      renderMessage(data, $name.value);
+      renderMessage(snap.val() || {}, $name.value);
     });
 
     // Save name locally
@@ -177,24 +170,19 @@
       localStorage.setItem("chat_name", $name.value.trim());
     });
 
-    // Send on submit / Enter
+    // Send on submit
     $form.addEventListener("submit", async (e) => {
       e.preventDefault();
       const name = ($name.value || "").trim().slice(0,32);
       const text = ($text.value || "").trim();
       if (!name || !text) return;
 
-      // Push message; store client timestamp for instant display
-      await push(roomRef, {
-        name, text,
-        ts: Date.now()
-      });
-
+      await push(roomRef, { name, text, ts: Date.now() });
       $text.value = "";
       $text.focus();
     });
 
-    // Also send on Ctrl+Enter / Cmd+Enter
+    // Send on Ctrl+Enter
     $text.addEventListener("keydown", (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
         $form.requestSubmit();
