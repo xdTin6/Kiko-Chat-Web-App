@@ -3,20 +3,16 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Kiko Chat — Full</title>
+<title>Kiko Chat — Ephemeral</title>
 
-<!-- MODULE SCRIPT: Firebase + main logic -->
 <script type="module">
 /* ----------------- FIREBASE SDK ----------------- */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-app.js";
 import {
   getDatabase, ref as dbRef, push, onChildAdded, remove, set, get, child, update, onValue, onDisconnect
 } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-database.js";
-import {
-  getStorage, ref as storageRef, uploadBytes, getDownloadURL
-} from "https://www.gstatic.com/firebasejs/10.12.3/firebase-storage.js";
 
-/* ====== YOUR FIREBASE CONFIG - keep as is ====== */
+/* ====== YOUR FIREBASE CONFIG ====== */
 const firebaseConfig = {
   apiKey: "AIzaSyAe_ZfZ8rKCke47UeA9Kcs8cXpD6-G6RAQ",
   authDomain: "kiko-chat-b6435.firebaseapp.com",
@@ -27,558 +23,177 @@ const firebaseConfig = {
   appId: "1:896370793240:web:3f14442a5d80cd71fb1c6d",
   measurementId: "G-FB55ZBH15N"
 };
-/* ================================================ */
-
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
-const storage = getStorage(app);
 
-/* DB refs */
 const USERS_PATH = "users";
 const ROOM_PATH = "rooms/room1/messages";
 const usersRef = dbRef(db, USERS_PATH);
 const roomRef = dbRef(db, ROOM_PATH);
 
-/* Local state */
-let state = {
-  currentUser: null,
-  userMap: {},           // username -> info from DB
-  totalUsersCount: 0
-};
+let state = { currentUser: null, userMap: {} };
 
-/* =================== Helpers =================== */
-function mkKey(name){ return String(name || "").trim().toLowerCase(); }
-function colorFromName(name){
-  let hash = 0;
-  for (let i=0;i<name.length;i++) hash = name.charCodeAt(i) + ((hash<<5)-hash);
-  const hue = Math.abs(hash % 360);
-  return `hsl(${hue},70%,45%)`;
-}
-function fmtTime(ts){
-  try{ return new Date(ts).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); } catch { return ""; }
-}
-function lastSeenText(ts){
-  if(!ts) return "last seen unknown";
-  const diff = Math.floor((Date.now()-ts)/1000);
-  if(diff < 10) return "online just now";
-  if(diff < 60) return `last seen ${diff}s ago`;
-  if(diff < 3600) return `last seen ${Math.floor(diff/60)}m ago`;
-  if(diff < 86400) return `last seen ${Math.floor(diff/3600)}h ago`;
-  return `last seen ${Math.floor(diff/86400)}d ago`;
-}
+/* Helpers */
+function mkKey(name){ return String(name||"").trim().toLowerCase(); }
+function colorFromName(name){ let h=0;for(let i=0;i<name.length;i++)h=name.charCodeAt(i)+((h<<5)-h);return `hsl(${Math.abs(h%360)},70%,45%)`; }
+function fmtTime(ts){ return new Date(ts).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}); }
+function lastSeenText(ts){ if(!ts)return"last seen unknown";const d=Math.floor((Date.now()-ts)/1000);if(d<10)return"online";if(d<60)return`${d}s ago`;if(d<3600)return`${Math.floor(d/60)}m ago`;if(d<86400)return`${Math.floor(d/3600)}h ago`;return `${Math.floor(d/86400)}d ago`; }
 
-/* ================ Presence & Status ================ */
+/* Presence */
 async function setPresence(username){
-  const key = mkKey(username);
-  if(!key) return;
-  const statusRef = dbRef(db, `${USERS_PATH}/${key}/status`);
-  await set(statusRef, { online: true, lastSeen: Date.now() });
-  onDisconnect(statusRef).set({ online: false, lastSeen: Date.now() });
+  const statusRef=dbRef(db,`${USERS_PATH}/${username}/status`);
+  await set(statusRef,{online:true,lastSeen:Date.now()});
+  onDisconnect(statusRef).set({online:false,lastSeen:Date.now()});
 }
 
-/* ================ User functions ================== */
-async function createUser(username, pass, role="user"){
-  const k = mkKey(username);
-  if(!k) return alert("username required");
-  await set(child(usersRef, k), { pass: String(pass), role });
-  await loadUsers();
-  return true;
+/* Users */
+async function createUser(username,pass,role="user"){
+  const k=mkKey(username); if(!k)return;
+  await set(child(usersRef,k),{pass:String(pass),role});
 }
-async function setUserAvatar(username, file){
-  if(!file) return;
-  const k = mkKey(username);
-  const path = `avatars/${k}_${Date.now()}_${file.name}`;
-  const sRef = storageRef(storage, path);
-  await uploadBytes(sRef, file);
-  const url = await getDownloadURL(sRef);
-  await update(child(usersRef, k), { avatar: url });
-  await loadUsers();
-  return url;
-}
-
-/* ================ Messages: send + upload ================ */
-async function sendTextMessage(text){
-  if(!state.currentUser) return alert("login first");
-  const payload = {
-    type: "text",
-    name: state.currentUser.name,
-    text: text.trim(),
-    ts: Date.now(),
-    deliveredBy: { [state.currentUser.name]: true }, // sender included
-    seenBy: {}
-  };
-  await push(roomRef, payload);
-}
-
-async function uploadAndSendFile(file){
-  if(!state.currentUser) return alert("login first");
-  const isImage = file.type.startsWith("image/");
-  const isVideo = file.type.startsWith("video/");
-  if(!isImage && !isVideo) return alert("only image/video allowed");
-  const path = `messages/${Date.now()}_${state.currentUser.name}_${file.name}`;
-  const sRef = storageRef(storage, path);
-  await uploadBytes(sRef, file);
-  const url = await getDownloadURL(sRef);
-  const payload = {
-    type: isVideo ? "video" : "image",
-    name: state.currentUser.name,
-    url,
-    filename: file.name,
-    ts: Date.now(),
-    deliveredBy: { [state.currentUser.name]: true },
-    seenBy: {}
-  };
-  await push(roomRef, payload);
-}
-
-/* ================ Delivered & Seen logic =================
-  - When any client receives an onChildAdded for a message that is not theirs,
-    they will mark deliveredBy[currentUser]=true.
-  - When the message is rendered (visible), client marks seenBy[currentUser]=true.
-  - Ticks interpretation for messages sent by currentUser:
-      * 1 gray tick = message exists (sent)
-      * 2 gray ticks = deliveredBy contains >1 user (others delivered)
-      * 2 blue ticks = seenBy contains >=1 other user
-  ===========================================================*/
-async function markDelivered(messageKey){
-  if(!state.currentUser) return;
-  const key = messageKey;
-  if(!key) return;
-  const target = dbRef(db, `${ROOM_PATH}/${key}/deliveredBy/${state.currentUser.name}`);
-  await set(target, true);
-}
-async function markSeen(messageKey){
-  if(!state.currentUser) return;
-  const key = messageKey;
-  if(!key) return;
-  const target = dbRef(db, `${ROOM_PATH}/${key}/seenBy/${state.currentUser.name}`);
-  await set(target, true);
-}
-
-/* ================ Load users list ================== */
 async function loadUsers(){
-  const snap = await get(usersRef);
-  state.userMap = {};
-  if(!snap.exists()) { updateUsersUI(); return; }
-  const data = snap.val();
-  state.userMap = data;
-  state.totalUsersCount = Object.keys(data).length;
-  updateUsersUI();
+  const snap=await get(usersRef); if(!snap.exists())return;
+  state.userMap=snap.val(); updateUsersUI();
 }
-
-/* ================ UI rendering helpers ================== */
 function updateUsersUI(){
-  const ul = document.getElementById("usersList");
-  ul.innerHTML = "";
-  const map = state.userMap || {};
-  for(const [username, info] of Object.entries(map)){
-    const row = document.createElement("div"); row.className = "userItem";
-    const av = document.createElement("div"); av.className = "miniAvatar";
-    if(info.avatar){ av.style.backgroundImage = `url('${info.avatar}')`; av.style.backgroundSize = "cover"; av.textContent = ""; }
-    else { av.style.background = colorFromName(username); av.textContent = username[0].toUpperCase(); }
-    const nm = document.createElement("div"); nm.className = "userName"; nm.textContent = username;
-    const status = document.createElement("div"); status.className = "userStatus";
-    if(info.status && info.status.online) status.textContent = "online";
-    else status.textContent = info.status && info.status.lastSeen ? lastSeenText(info.status.lastSeen) : "offline";
-    row.appendChild(av); row.appendChild(nm); row.appendChild(status);
-    ul.appendChild(row);
+  const ul=document.getElementById("usersList"); ul.innerHTML="";
+  for(const [username,info] of Object.entries(state.userMap)){
+    const row=document.createElement("div"); row.className="userItem";
+    const av=document.createElement("div"); av.className="miniAvatar";
+    if(info.avatar){ av.style.backgroundImage=`url('${info.avatar}')`; av.style.backgroundSize="cover"; }
+    else { av.style.background=colorFromName(username); av.textContent=username[0].toUpperCase(); }
+    const nm=document.createElement("div"); nm.className="userName"; nm.textContent=username;
+    const st=document.createElement("div"); st.className="userStatus";
+    st.textContent=info.status&&info.status.online?"online":lastSeenText(info.status?.lastSeen);
+    row.append(av,nm,st); ul.appendChild(row);
   }
 }
 
-/* ================ Render messages ================== */
-function renderMessage(key, msg){
-  const messages = document.getElementById("messages");
-  const wrapper = document.createElement("div");
-  wrapper.className = "msgRow " + (msg.name === state.currentUser?.name ? "me" : "other");
-  wrapper.dataset.key = key;
-
-  // avatar
-  const avatar = document.createElement("div"); avatar.className = "avatar";
-  const userInfo = state.userMap[msg.name] || {};
-  if(userInfo.avatar){ avatar.style.backgroundImage = `url('${userInfo.avatar}')`; avatar.style.backgroundSize = "cover"; avatar.textContent = ""; }
-  else { avatar.style.background = colorFromName(msg.name || ""); avatar.textContent = (msg.name||"?")[0].toUpperCase(); }
-
-  // bubble
-  const bubble = document.createElement("div"); bubble.className = "bubble";
-  const meta = document.createElement("div"); meta.className = "meta"; meta.textContent = `${msg.name} · ${fmtTime(msg.ts)}`;
-  bubble.appendChild(meta);
-
-  if(msg.type === "image"){
-    const img = document.createElement("img"); img.className = "chat-img"; img.src = msg.url; bubble.appendChild(img);
-  } else if(msg.type === "video"){
-    const vid = document.createElement("video"); vid.className = "chat-video"; vid.src = msg.url; vid.controls = true; bubble.appendChild(vid);
-  } else {
-    const t = document.createElement("div"); t.className = "text"; t.textContent = msg.text || "";
-    bubble.appendChild(t);
-  }
-
-  // ticks area
-  const ticks = document.createElement("div"); ticks.className = "ticks";
-  // decide ticks state
-  if(state.currentUser && msg.name === state.currentUser.name){
-    // compute delivered/seen status from msg data
-    const deliveredBy = msg.deliveredBy ? Object.keys(msg.deliveredBy) : [];
-    const seenBy = msg.seenBy ? Object.keys(msg.seenBy) : [];
-    const deliveredCount = deliveredBy.length;
-    const seenCount = seenBy.filter(u => u !== msg.name).length; // excluding sender
-    const singleGray = document.createElement("span"); singleGray.className = "tick singleGray"; singleGray.textContent = "✓";
-    const doubleGray = document.createElement("span"); doubleGray.className = "tick doubleGray"; doubleGray.textContent = "✓✓";
-    const doubleBlue = document.createElement("span"); doubleBlue.className = "tick doubleBlue"; doubleBlue.textContent = "✓✓";
-
-    // show:
-    // - always at least singleGray
-    // - if deliveredCount > 1 (others), show doubleGray
-    // - if seenCount > 0, show doubleBlue
-    if(seenCount > 0) ticks.appendChild(doubleBlue);
-    else if(deliveredCount > 1) ticks.appendChild(doubleGray);
-    else ticks.appendChild(singleGray);
-  } else {
-    // for other users' messages, show nothing or small dot
-    const dot = document.createElement("span"); dot.className = "dot"; dot.textContent = "";
-    ticks.appendChild(dot);
-  }
-
-  bubble.appendChild(ticks);
-
-  wrapper.appendChild(avatar);
-  wrapper.appendChild(bubble);
-  messages.appendChild(wrapper);
-  messages.scrollTop = messages.scrollHeight;
-
-  // mark delivered + seen for other-users messages
-  const k = key;
-  if(state.currentUser && msg.name !== state.currentUser.name){
-    // mark delivered
-    markDelivered(k).catch(()=>{});
-    // mark seen immediately for simplicity
-    markSeen(k).catch(()=>{});
-  }
+/* Messages */
+async function sendTextMessage(txt){
+  if(!state.currentUser)return;
+  const msg={type:"text",name:state.currentUser.name,text:txt,ts:Date.now(),
+    deliveredBy:{[state.currentUser.name]:true},seenBy:{}};
+  await push(roomRef,msg);
 }
-
-/* ================ Live listeners ================== */
-function attachListeners(){
-  // messages
-  onChildAdded(roomRef, snapshot => {
-    const key = snapshot.key;
-    const msg = snapshot.val();
-    renderMessage(key, msg);
-  });
-
-  // watch users for status updates
-  onValue(usersRef, snapshot => {
-    if(!snapshot.exists()) return;
-    state.userMap = snapshot.val();
-    // update status and user list UI
-    updateUsersUI();
-  });
-}
-
-/* ================ Login (case-insensitive) ================ */
-async function loginFlow(rawUsername, pass){
-  const username = mkKey(rawUsername);
-  if(!username) return alert("enter username");
-  try{
-    const snap = await get(child(usersRef, username));
-    console.log("login attempt:", username, "exists:", snap.exists(), "val:", snap.val());
-    if(!snap.exists()) { alert("User not found"); return false; }
-    const data = snap.val();
-    if(String(data.pass) !== String(pass)) { alert("Wrong passcode"); return false; }
-
-    state.currentUser = { name: username, role: data.role, avatar: data.avatar || null };
-    localStorage.setItem("chat_user", JSON.stringify(state.currentUser));
-    // set presence
-    await setPresence(username);
-    // after login: show UI
-    document.getElementById("loginPane").style.display = "none";
-    document.getElementById("mainWrap").style.display = "grid";
-    document.getElementById("meName").textContent = username;
-    document.getElementById("meRole").textContent = data.role || "";
-    if(data.role === "admin"){ document.getElementById("adminPanel").style.display = "block"; }
-    else{ document.getElementById("adminPanel").style.display = "none"; }
-    // load users & attach listeners
-    await loadUsers();
-    attachListeners();
-    return true;
-  }catch(e){ console.error(e); alert("Login error"); return false; }
-}
-
-/* ================ Restore saved login & wallpaper/theme ================ */
-window.addEventListener("load", async () => {
-  // restore theme
-  if(localStorage.getItem("theme") === "light") document.documentElement.classList.add("light");
-  // wallpaper auto-load if present in content folder
-  const img = new Image();
-  img.src = "content/wallpaper.jpg";
-  img.onload = () => {
-    document.getElementById("mainWrap").style.backgroundImage = `url('${img.src}')`;
-    document.getElementById("mainWrap").classList.add("hasWallpaper");
+async function uploadAndSendFile(file){
+  if(!state.currentUser)return;
+  const isImg=file.type.startsWith("image/"),isVid=file.type.startsWith("video/");
+  if(!isImg&&!isVid)return alert("only img/video");
+  const reader=new FileReader();
+  reader.onload=async e=>{
+    const msg={type:isVid?"video":"image",name:state.currentUser.name,
+      data:e.target.result,filename:file.name,ts:Date.now(),
+      deliveredBy:{[state.currentUser.name]:true},seenBy:{}};
+    await push(roomRef,msg);
   };
-  // restore login
-  const stored = localStorage.getItem("chat_user");
-  if(stored){
-    state.currentUser = JSON.parse(stored);
-    // attempt to set presence and UI (safe)
-    await setPresence(state.currentUser.name).catch(()=>{});
-    document.getElementById("loginPane").style.display = "none";
-    document.getElementById("mainWrap").style.display = "grid";
-    document.getElementById("meName").textContent = state.currentUser.name;
-    document.getElementById("meRole").textContent = state.currentUser.role || "";
-    if(state.currentUser.role === "admin") document.getElementById("adminPanel").style.display = "block";
-    await loadUsers();
-    attachListeners();
-  } else {
-    document.getElementById("mainWrap").style.display = "none";
+  reader.readAsDataURL(file);
+}
+async function markDelivered(k){ if(state.currentUser) await set(dbRef(db,`${ROOM_PATH}/${k}/deliveredBy/${state.currentUser.name}`),true);}
+async function markSeen(k){ if(state.currentUser) await set(dbRef(db,`${ROOM_PATH}/${k}/seenBy/${state.currentUser.name}`),true); }
+
+/* Render */
+function renderMessage(key,msg){
+  const messages=document.getElementById("messages");
+  const wrap=document.createElement("div"); wrap.className="msgRow "+(msg.name===state.currentUser?.name?"me":"other");
+  const av=document.createElement("div"); av.className="avatar"; av.style.background=colorFromName(msg.name||"?"); av.textContent=(msg.name||"?")[0].toUpperCase();
+  const bubble=document.createElement("div"); bubble.className="bubble";
+  const meta=document.createElement("div"); meta.className="meta"; meta.textContent=`${msg.name} · ${fmtTime(msg.ts)}`; bubble.appendChild(meta);
+  if(msg.type==="image"){ const i=document.createElement("img");i.src=msg.data;i.className="chat-img";bubble.appendChild(i);
+    const dl=document.createElement("a");dl.href=msg.data;dl.download=msg.filename||"img.png";dl.textContent="⬇️ Download";dl.className="dl";bubble.appendChild(dl);}
+  else if(msg.type==="video"){ const v=document.createElement("video");v.src=msg.data;v.controls=true;v.className="chat-video";bubble.appendChild(v);
+    const dl=document.createElement("a");dl.href=msg.data;dl.download=msg.filename||"vid.mp4";dl.textContent="⬇️ Download";dl.className="dl";bubble.appendChild(dl);}
+  else { const t=document.createElement("div");t.textContent=msg.text||"";bubble.appendChild(t);}
+  const ticks=document.createElement("div");ticks.className="ticks";
+  if(state.currentUser&&msg.name===state.currentUser.name){
+    const del=Object.keys(msg.deliveredBy||{}).length, seen=Object.keys(msg.seenBy||{}).filter(u=>u!==msg.name).length;
+    ticks.textContent=seen>0?"✓✓":"✓"+(del>1?"✓":"");
+    ticks.style.color=seen>0?"#2ea1ff":"#aaa";
   }
+  bubble.appendChild(ticks);
+  wrap.append(av,bubble); messages.appendChild(wrap); messages.scrollTop=messages.scrollHeight;
+  if(state.currentUser&&msg.name!==state.currentUser.name){ markDelivered(key); markSeen(key); }
+}
+
+/* Listeners */
+function attachListeners(){
+  onChildAdded(roomRef,s=>{renderMessage(s.key,s.val());});
+  onValue(usersRef,s=>{if(s.exists()){state.userMap=s.val();updateUsersUI();}});
+}
+
+/* Login */
+async function loginFlow(raw,pass){
+  const u=mkKey(raw); const snap=await get(child(usersRef,u));
+  if(!snap.exists())return alert("User not found");
+  const d=snap.val(); if(d.pass!==pass)return alert("Wrong pass");
+  state.currentUser={name:u,role:d.role}; localStorage.setItem("chat_user",JSON.stringify(state.currentUser));
+  await setPresence(u);
+  document.getElementById("loginPane").style.display="none";
+  document.getElementById("mainWrap").style.display="grid";
+  document.getElementById("meName").textContent=u; document.getElementById("meRole").textContent=d.role;
+  if(d.role==="admin")document.getElementById("adminPanel").style.display="block";
+  await loadUsers(); attachListeners();
+}
+
+/* Restore */
+window.addEventListener("load",async()=>{
+  const stored=localStorage.getItem("chat_user");
+  if(stored){state.currentUser=JSON.parse(stored);await setPresence(state.currentUser.name).catch(()=>{});document.getElementById("loginPane").style.display="none";document.getElementById("mainWrap").style.display="grid";document.getElementById("meName").textContent=state.currentUser.name;document.getElementById("meRole").textContent=state.currentUser.role;attachListeners();}
 });
 
-/* ================ Expose small API for UI buttons ================ */
-window.Kiko = {
-  login: loginFlow,
-  createUser: createUser,
-  setUserAvatar,
-  sendTextMessage,
-  uploadAndSendFile,
-  clearChat: async ()=>{ await remove(roomRef); document.getElementById("messages").innerHTML = ""; }
-};
-
+window.Kiko={login:loginFlow,createUser,sendTextMessage,uploadAndSendFile,clearChat:async()=>{await remove(roomRef);document.getElementById("messages").innerHTML="";}};
 </script>
 
-<!-- ============== STYLES (modern dashboard) ============== -->
 <style>
-:root{
-  --bg: #0b0d10; --panel: rgba(20,20,22,0.85); --accent: #5b9dff; --muted: #9aa3b2; --glass: rgba(255,255,255,0.03);
-}
-:root.light{ --bg: #f5f7fa; --panel: rgba(255,255,255,0.9); --accent: #2563eb; --muted: #52606d; --glass: rgba(0,0,0,0.03); }
-*{box-sizing:border-box;font-family:Inter, ui-sans-serif, system-ui;}
-body{margin:0;background:var(--bg);height:100vh;color:#e8eef8;display:flex;align-items:center;justify-content:center;}
-#mainWrap{width:96%;height:90vh;border-radius:12px;overflow:hidden;display:grid;grid-template-columns:260px 1fr;gap:18px;padding:18px;background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.05));}
-#mainWrap.hasWallpaper{background-size:cover;background-position:center;}
-.left{background:var(--panel);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:12px;box-shadow:0 6px 18px rgba(0,0,0,0.5);}
-.brand{display:flex;align-items:center;gap:10px}
-.logo{width:44px;height:44px;border-radius:10px;background:var(--accent);display:flex;align-items:center;justify-content:center;font-weight:700;color:white}
-.smallMuted{color:var(--muted);font-size:13px}
-#usersList{flex:1;overflow:auto;padding-top:8px;display:flex;flex-direction:column;gap:8px}
-.userItem{display:flex;align-items:center;gap:10px;padding:6px;border-radius:8px;cursor:default}
-.userItem:hover{background:var(--glass)}
-.miniAvatar{width:38px;height:38px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:white;font-weight:700}
-.controls{display:flex;flex-direction:column;gap:8px}
-.controls input[type="file"]{display:none}
-
-/* RIGHT */
+:root{--bg:#0b0d10;--panel:rgba(20,20,22,.85);--accent:#5b9dff;--muted:#9aa3b2;}
+body{margin:0;background:var(--bg);height:100vh;display:flex;align-items:center;justify-content:center;color:#eee;font-family:Inter;}
+#mainWrap{width:96%;height:90vh;border-radius:12px;overflow:hidden;display:grid;grid-template-columns:260px 1fr;gap:18px;padding:18px}
+.left{background:var(--panel);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:12px}
+#usersList{flex:1;overflow:auto}
+.userItem{display:flex;gap:10px;align-items:center;padding:6px}
+.miniAvatar{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700}
+.userStatus{font-size:12px;color:var(--muted)}
 .right{display:flex;flex-direction:column;gap:12px}
-.topbar{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-radius:10px;background:var(--panel)}
-.top-left{display:flex;gap:12px;align-items:center}
-#meName{font-weight:700}
-.actions{display:flex;gap:8px;align-items:center}
-.actions button{background:transparent;border:1px solid rgba(255,255,255,0.06);padding:8px;border-radius:8px;color:var(--muted);cursor:pointer}
-.chatPanel{flex:1;background:transparent;border-radius:10px;display:flex;flex-direction:column;overflow:hidden}
-#messages{flex:1;overflow:auto;padding:18px;display:flex;flex-direction:column;gap:12px}
-.msgRow{display:flex;gap:12px;align-items:flex-end;max-width:85%}
+.topbar{display:flex;justify-content:space-between;align-items:center;background:var(--panel);padding:8px;border-radius:10px}
+#messages{flex:1;overflow:auto;display:flex;flex-direction:column;gap:12px}
+.msgRow{display:flex;gap:10px;align-items:flex-end;max-width:85%}
 .msgRow.me{margin-left:auto;flex-direction:row-reverse}
-.avatar{width:48px;height:48px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;font-weight:700;flex-shrink:0}
-.bubble{padding:10px 14px;border-radius:12px;background:rgba(255,255,255,0.04);max-width:620px;color:var(--text)}
-.msgRow.me .bubble{background:var(--accent);color:white}
+.avatar{width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700}
+.bubble{padding:10px 14px;border-radius:12px;background:rgba(255,255,255,.1);max-width:60%}
+.msgRow.me .bubble{background:var(--accent);color:#fff}
 .meta{font-size:12px;color:var(--muted);margin-bottom:6px}
-.chat-img{max-width:420px;border-radius:8px;display:block}
-.chat-video{max-width:420px;border-radius:8px;display:block}
-.composer{display:flex;gap:8px;padding:12px;border-radius:10px;background:var(--panel);align-items:center}
-.composer input[type="text"], .composer textarea{flex:1;padding:10px;border-radius:8px;border:none;background:rgba(255,255,255,0.03);color:inherit}
-.composer button{padding:10px 14px;border-radius:8px;border:none;background:var(--accent);color:#fff;cursor:pointer}
-.ticks{display:inline-block;margin-left:8px;font-size:12px;opacity:0.9}
-.tick.singleGray{color:#aaa}
-.tick.doubleGray{color:#cfcfcf}
-.tick.doubleBlue{color:#2ea1ff}
-
-/* admin panel */
-#adminPanel{display:none;padding:10px;border-radius:8px;background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.02))}
-#adminPanel input{width:100%;padding:8px;margin:6px 0;border-radius:6px;border:none;background:rgba(255,255,255,0.03);color:inherit}
-
-/* responsive */
-@media (max-width:1000px){ #mainWrap{grid-template-columns:1fr} .left{display:none} }
+.chat-img,.chat-video{max-width:260px;border-radius:8px;display:block}
+.dl{font-size:12px;color:var(--muted)}
+.ticks{font-size:12px;margin-top:4px}
+.composer{display:flex;gap:8px;background:var(--panel);padding:8px;border-radius:8px}
+.composer input{flex:1;border:none;border-radius:6px;padding:8px}
 </style>
-
 </head>
 <body>
-  <div id="mainWrap">
-    <!-- LEFT -->
-    <div class="left">
-      <div class="brand">
-        <div class="logo">K</div>
-        <div>
-          <div style="font-weight:700">Kiko Chat</div>
-          <div class="smallMuted">Private dashboard</div>
-        </div>
-      </div>
-
-      <div id="usersList" aria-live="polite"></div>
-
-      <div class="controls">
-        <label class="smallMuted">Admin actions</label>
-        <div id="adminPanel">
-          <div style="display:flex;gap:8px">
-            <input id="newUsername" placeholder="username" />
-            <input id="newPass" placeholder="passcode" />
-          </div>
-          <div style="display:flex;gap:8px;margin-top:6px">
-            <button id="createUserBtn">Create User</button>
-            <button id="createAdminBtn">Create Admin</button>
-          </div>
-          <div style="display:flex;gap:8px;margin-top:8px">
-            <input id="avatarFile" type="file" accept="image/*" />
-            <button id="setAvatarBtn">Set Avatar</button>
-          </div>
-          <div style="display:flex;gap:8px;margin-top:8px">
-            <button id="clearBtn">Clear Chat</button>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- RIGHT -->
-    <div class="right">
-      <div class="topbar">
-        <div class="top-left">
-          <div id="meName">Not logged</div>
-          <div style="color:var(--muted);margin-left:8px" id="meRole"></div>
-        </div>
-        <div class="actions">
-          <input id="fileInput" type="file" accept="image/*,video/*" style="display:none" />
-          <button id="attachBtn">📎</button>
-          <button id="themeToggle">🌙/🌞</button>
-          <button id="logoutBtn">Logout</button>
-        </div>
-      </div>
-
-      <!-- chat panel -->
-      <div class="chatPanel" id="dashboard" style="display:none">
-        <div id="messages" aria-live="polite"></div>
-
-        <div class="composer">
-          <input id="textInput" type="text" placeholder="Type a message or attach an image/video..." />
-          <button id="sendBtn">Send</button>
-        </div>
-      </div>
-
-      <!-- login -->
-      <div id="loginPane" style="display:grid;place-items:center">
-        <div style="width:420px;background:rgba(0,0,0,0.25);padding:20px;border-radius:12px;text-align:center">
-          <h2 style="margin:0 0 8px">Secure Login</h2>
-          <input id="usernameLogin" placeholder="username" /><br/>
-          <input id="passLogin" placeholder="passcode" type="password" /><br/>
-          <div style="display:flex;gap:8px;justify-content:center;margin-top:8px">
-            <button id="loginBtn">Login</button>
-            <button id="adminHintBtn">Admin?</button>
-          </div>
-          <div style="color:var(--muted);font-size:13px;margin-top:8px">Admin creates users and sets avatars.</div>
-        </div>
-      </div>
+<div id="mainWrap" style="display:none">
+  <div class="left">
+    <div id="usersList"></div>
+    <div id="adminPanel" style="display:none">
+      <input id="newUsername" placeholder="username"/><input id="newPass" placeholder="pass"/>
+      <button onclick="Kiko.createUser(newUsername.value,newPass.value)">Create User</button>
+      <button onclick="Kiko.createUser(newUsername.value,newPass.value,'admin')">Create Admin</button>
+      <button onclick="Kiko.clearChat()">Clear Chat</button>
     </div>
   </div>
-
-<!-- ======= Small UI wiring (calls functions exposed earlier) ======= -->
-<script>
-  // elements
-  const usernameLogin = document.getElementById('usernameLogin');
-  const passLogin = document.getElementById('passLogin');
-  const loginBtn = document.getElementById('loginBtn');
-  const adminHintBtn = document.getElementById('adminHintBtn');
-  const logoutBtn = document.getElementById('logoutBtn');
-  const meName = document.getElementById('meName');
-  const meRole = document.getElementById('meRole');
-  const dashboard = document.getElementById('dashboard');
-  const adminPanel = document.getElementById('adminPanel');
-  const usersListEl = document.getElementById('usersList');
-  const createUserBtn = document.getElementById('createUserBtn');
-  const createAdminBtn = document.getElementById('createAdminBtn');
-  const newUsername = document.getElementById('newUsername');
-  const newPass = document.getElementById('newPass');
-  const attachBtn = document.getElementById('attachBtn');
-  const fileInput = document.getElementById('fileInput');
-  const sendBtn = document.getElementById('sendBtn');
-  const textInput = document.getElementById('textInput');
-  const clearBtn = document.getElementById('clearBtn');
-  const setAvatarBtn = document.getElementById('setAvatarBtn');
-  const avatarFile = document.getElementById('avatarFile');
-  const themeToggle = document.getElementById('themeToggle');
-
-  // login
-  loginBtn.addEventListener('click', async () => {
-    const u = usernameLogin.value.trim(), p = passLogin.value.trim();
-    if(!u||!p) return alert('enter username and pass');
-    const ok = await window.Kiko.login(u,p);
-    if(ok){
-      meName.textContent = u.toLowerCase();
-      // set role from db map
-      const map = window._userMap || {};
-      meRole.textContent = (map[u.toLowerCase()] && map[u.toLowerCase()].role) || "";
-      document.getElementById('loginPane').style.display = 'none';
-      document.getElementById('dashboard').style.display = 'grid';
-      if(map[u.toLowerCase()] && map[u.toLowerCase()].role === 'admin'){
-        adminPanel.style.display = 'block';
-        document.getElementById('adminPanel').style.display = 'block';
-      } else { adminPanel.style.display = 'none'; document.getElementById('adminPanel').style.display = 'none'; }
-    }
-  });
-
-  adminHintBtn.addEventListener('click', ()=> alert('Admin uses same login. If you are admin, use your admin username and passcode.'));
-
-  logoutBtn.addEventListener('click', () => { localStorage.removeItem('chat_user'); location.reload(); });
-
-  // create user/admin
-  createUserBtn.addEventListener('click', async () => {
-    if(!confirm('Create user?')) return;
-    await window.Kiko.createUser(newUsername.value.trim(), newPass.value.trim());
-    newUsername.value=''; newPass.value='';
-  });
-  createAdminBtn.addEventListener('click', async () => {
-    if(!confirm('Create admin?')) return;
-    await window.Kiko.createUser(newUsername.value.trim(), newPass.value.trim(), 'admin');
-    newUsername.value=''; newPass.value='';
-  });
-
-  // set avatar
-  setAvatarBtn.addEventListener('click', async () => {
-    const name = prompt('Enter username to set avatar for (case-insensitive):');
-    if(!name) return;
-    if(avatarFile.files.length===0) return alert('Pick file first');
-    await window.Kiko.setUserAvatar(name.trim().toLowerCase(), avatarFile.files[0]);
-    avatarFile.value='';
-  });
-
-  // attach file send
-  attachBtn.addEventListener('click', ()=> fileInput.click());
-  fileInput.addEventListener('change', async () => {
-    if(fileInput.files.length===0) return;
-    await window.Kiko.uploadAndSendFile(fileInput.files[0]);
-    fileInput.value='';
-  });
-
-  // send text
-  sendBtn.addEventListener('click', async ()=> {
-    const t = textInput.value.trim(); if(!t) return;
-    await window.Kiko.sendTextMessage(t);
-    textInput.value='';
-  });
-  textInput.addEventListener('keypress', async (e)=> {
-    if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); sendBtn.click(); }
-  });
-
-  // clear chat
-  clearBtn.addEventListener('click', async ()=> {
-    if(!confirm('Clear all messages?')) return;
-    await window.Kiko.clearChat();
-    document.getElementById('messages').innerHTML = '';
-  });
-
-  // theme toggle
-  themeToggle.addEventListener('click', ()=> {
-    document.documentElement.classList.toggle('light');
-    const isLight = document.documentElement.classList.contains('light');
-    localStorage.setItem('theme', isLight ? 'light' : 'dark');
-  });
-
-  // periodic refresh of users list to show status/avatars
-  setInterval(()=>{ if(window._chat && window._chat.loadUsersList) window._chat.loadUsersList(); }, 4000);
-</script>
+  <div class="right">
+    <div class="topbar"><div><span id="meName"></span> <span id="meRole"></span></div><button onclick="localStorage.clear();location.reload()">Logout</button></div>
+    <div id="messages"></div>
+    <div class="composer">
+      <input id="textInput" placeholder="Type message"/><button onclick="Kiko.sendTextMessage(textInput.value);textInput.value=''">Send</button>
+      <input type="file" id="fileInput" accept="image/*,video/*" hidden/>
+      <button onclick="fileInput.click()">📎</button>
+    </div>
+  </div>
+</div>
+<div id="loginPane">
+  <input id="usernameLogin" placeholder="username"/><input id="passLogin" placeholder="pass" type="password"/>
+  <button onclick="Kiko.login(usernameLogin.value,passLogin.value)">Login</button>
+</div>
+<script>fileInput.onchange=()=>{if(fileInput.files[0])Kiko.uploadAndSendFile(fileInput.files[0])}</script>
 </body>
 </html>
