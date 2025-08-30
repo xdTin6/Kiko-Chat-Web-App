@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Notes</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    :root{--bg:#0b0c0d;--panel:#0f172a;--text:#e5e7eb;--muted:#9ca3af;--line:#1f2937;--accent:#2563eb}
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+    .wrap{max-width:820px;margin:0 auto;padding:16px;display:grid;gap:12px}
+    header{display:flex;align-items:center;justify-content:space-between;padding-top:4px}
+    header h1{font-size:18px;margin:0;color:#f3f4f6}
+    .panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:12px}
+    #messages{height:62vh;overflow-y:auto;display:flex;flex-direction:column;gap:10px;padding:4px}
+    .item{max-width:80%}
+    .me{align-self:flex-end}
+    .bubble{padding:10px 12px;border-radius:12px;white-space:pre-wrap;word-wrap:break-word;line-height:1.35}
+    .me .bubble{background:#1f2937}
+    .other .bubble{background:#0b1220}
+    .meta{font-size:11px;color:var(--muted);margin-bottom:4px}
+    form.send{display:grid;grid-template-columns:1fr auto;gap:8px}
+    textarea{width:100%;min-height:56px;resize:none;border-radius:12px;padding:10px 12px;border:1px solid var(--line);background:#0b1220;color:var(--text)}
+    button{padding:10px 16px;border-radius:12px;border:0;background:var(--accent);color:#fff;font-weight:600;cursor:pointer}
+    input[type=text],input[type=password]{width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:#0b1220;color:var(--text)}
+    .row{display:flex;gap:8px;align-items:center}
+    #lock{min-height:100vh;display:grid;place-items:center}
+    .card{width:100%;max-width:380px}
+    .muted{font-size:12px;color:var(--muted);margin-top:8px}
+    .tiny{font-size:10px;color:var(--muted)}
+    .hidden{display:none !important}
+  </style>
+</head>
+<body>
+  <!-- Lock screen -->
+  <section id="lock">
+    <div class="panel card">
+      <h2 style="margin:0 0 8px">Sign in</h2>
+      <div class="muted">Enter the shared PIN</div>
+      <div class="row" style="margin-top:10px">
+        <input id="pin" type="password" placeholder="PIN" autofocus />
+        <button id="enterBtn">Enter</button>
+      </div>
+      <div class="muted" style="margin-top:10px">Tip: page title is boring on purpose.</div>
+    </div>
+  </section>
+
+  <!-- Chat -->
+  <section id="app" class="hidden">
+    <div class="wrap">
+      <header>
+        <h1>Private Notes</h1>
+        <div class="row">
+          <input id="name" type="text" placeholder="Your name" style="width:160px">
+          <button id="signOut">Lock</button>
+        </div>
+      </header>
+
+      <div id="messages" class="panel" aria-live="polite"></div>
+
+      <form id="sendForm" class="panel send">
+        <textarea id="text" placeholder="Type a message…" required></textarea>
+        <button type="submit">Send</button>
+      </form>
+
+      <div class="tiny">Messages are stored in Firebase Realtime Database.</div>
+    </div>
+  </section>
+
+  <!-- Firebase (ES modules from CDN) -->
+  <script type="module">
+    /* ======== 1) CONFIGURE YOUR PIN (client-side gate; not real security) ======== */
+    const PIN = "PIN_CODE_HERE"; // <-- change this
+
+    /* ======== 2) Your Firebase config (you pasted this) ======== */
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-app.js";
+    import {
+      getDatabase, ref, push, onChildAdded, query, limitToLast, serverTimestamp, update
+    } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-database.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyAe_ZfZ8rKCke47UeA9Kcs8cXpD6-G6RAQ",
+      authDomain: "kiko-chat-b6435.firebaseapp.com",
+      databaseURL: "https://kiko-chat-b6435-default-rtdb.firebaseio.com",
+      projectId: "kiko-chat-b6435",
+      storageBucket: "kiko-chat-b6435.firebasestorage.app",
+      messagingSenderId: "896370793240",
+      appId: "1:896370793240:web:3f14442a5d80cd71fb1c6d",
+      measurementId: "G-FB55ZBH15N"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db  = getDatabase(app);
+
+    /* ======== 3) Elements ======== */
+    const $lock = document.getElementById("lock");
+    const $app  = document.getElementById("app");
+    const $pin  = document.getElementById("pin");
+    const $enter= document.getElementById("enterBtn");
+    const $name = document.getElementById("name");
+    const $messages = document.getElementById("messages");
+    const $form = document.getElementById("sendForm");
+    const $text = document.getElementById("text");
+    const $signOut = document.getElementById("signOut");
+
+    /* ======== 4) Lock screen logic ======== */
+    function unlockIfRemembered() {
+      const ok = localStorage.getItem("chat_pin_ok") === "1";
+      if (ok) showApp();
+    }
+    function showApp() {
+      $lock.classList.add("hidden");
+      $app.classList.remove("hidden");
+      $name.value = localStorage.getItem("chat_name") || "";
+      $text.focus();
+    }
+    $enter.addEventListener("click", () => {
+      if ($pin.value.trim() === PIN) {
+        localStorage.setItem("chat_pin_ok","1");
+        showApp();
+      } else {
+        alert("Wrong PIN");
+      }
+    });
+    $pin.addEventListener("keydown", e => {
+      if (e.key === "Enter") $enter.click();
+    });
+    $signOut.addEventListener("click", () => {
+      localStorage.removeItem("chat_pin_ok");
+      location.reload();
+    });
+    unlockIfRemembered();
+
+    /* ======== 5) Chat logic (Realtime Database) ======== */
+    // Room path in DB (you can change "room1" to any word)
+    const roomRef = ref(db, "rooms/room1/messages");
+
+    function fmt(ts){
+      try {
+        return new Intl.DateTimeFormat(undefined, {
+          year:"2-digit", month:"2-digit", day:"2-digit",
+          hour:"2-digit", minute:"2-digit"
+        }).format(new Date(ts));
+      } catch {
+        return "";
+      }
+    }
+
+    function renderMessage(msg, myName) {
+      const item = document.createElement("div");
+      const who = (msg.name || "anon").trim();
+      const mine = myName && who === myName.trim();
+
+      item.className = `item ${mine ? "me" : "other"}`;
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      meta.textContent = `${fmt(msg.ts || Date.now())} · ${who}`;
+
+      const bubble = document.createElement("div");
+      bubble.className = "bubble";
+      bubble.textContent = msg.text || "";
+
+      item.appendChild(meta);
+      item.appendChild(bubble);
+      $messages.appendChild(item);
+      $messages.scrollTop = $messages.scrollHeight;
+    }
+
+    // Live stream last 200 messages
+    onChildAdded(query(roomRef, limitToLast(200)), snap => {
+      const data = snap.val() || {};
+      renderMessage(data, $name.value);
+    });
+
+    // Save name locally
+    $name.addEventListener("change", () => {
+      localStorage.setItem("chat_name", $name.value.trim());
+    });
+
+    // Send on submit / Enter
+    $form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const name = ($name.value || "").trim().slice(0,32);
+      const text = ($text.value || "").trim();
+      if (!name || !text) return;
+
+      // Push message; store client timestamp for instant display
+      await push(roomRef, {
+        name, text,
+        ts: Date.now()
+      });
+
+      $text.value = "";
+      $text.focus();
+    });
+
+    // Also send on Ctrl+Enter / Cmd+Enter
+    $text.addEventListener("keydown", (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        $form.requestSubmit();
+      }
+    });
+  </script>
+</body>
+</html>
