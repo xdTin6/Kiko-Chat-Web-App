@@ -1,4 +1,4 @@
-````markdown
+markdown
 # 🐱 KikoChat
 
 KikoChat is a **modern real-time chat web app** built with **Firebase Realtime Database & Storage** and deployed on **GitHub Pages**.  
@@ -59,7 +59,7 @@ It’s designed with a **WhatsApp-like experience** plus extra admin features �
 ## 🛠️ Setup
 
 ### 1. Clone this repo
-```bash
+````bash
 git clone https://github.com/your-username/kikochat.git
 cd kikochat
 ````
