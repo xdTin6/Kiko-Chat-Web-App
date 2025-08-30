@@ -149,18 +149,4 @@ service firebase.storage {
 
 ## 👨‍💻 Author
 
-Made with ❤️ by **\[Your Name]**
-
-```
-
----
-
-👉 Now your README includes:  
-- Features ✅  
-- Screenshots placeholders ✅  
-- Firebase setup ✅  
-- GitHub Pages deployment ✅  
-- Firebase **rules** ✅  
-
-Do you want me to **tighten the Firebase rules** so only users that exist under `/users` with the right passcode can access, instead of public read/write? That way it won’t be open to strangers.
-```
+Made with ❤️ by **\[Xdtin6]**
