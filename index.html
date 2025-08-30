@@ -89,7 +89,8 @@ async function sendTextMessage(txt){
   const msg={type:"text",name:state.currentUser.name,text:txt.trim(),ts:Date.now(),
     deliveredBy:{[state.currentUser.name]:true},seenBy:{}};
   await push(roomRef,msg);
-  elements.textInput.value = ''; // Clear input after sending
+  elements.textInput.value = ''; // Clear input
+  elements.textInput.style.height = 'auto'; // Reset height
 }
 
 async function uploadAndSendFile(file){
@@ -182,6 +183,7 @@ function bindEvents() {
     elements.loginButton.addEventListener('click', () => Kiko.login(elements.usernameLogin.value, elements.passLogin.value));
     elements.logoutBtn.addEventListener('click', () => { localStorage.clear(); location.reload(); });
     
+    // Text Input Events
     elements.sendBtn.addEventListener('click', () => Kiko.sendTextMessage(elements.textInput.value));
     elements.textInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
@@ -189,6 +191,12 @@ function bindEvents() {
             Kiko.sendTextMessage(elements.textInput.value);
         }
     });
+    // Auto-grow textarea
+    elements.textInput.addEventListener('input', () => {
+        elements.textInput.style.height = 'auto';
+        elements.textInput.style.height = `${elements.textInput.scrollHeight}px`;
+    });
+
 
     elements.attachBtn.addEventListener('click', () => elements.fileInput.click());
     elements.fileInput.addEventListener('change', () => { if(elements.fileInput.files[0]) Kiko.uploadAndSendFile(elements.fileInput.files[0])});
@@ -334,9 +342,25 @@ html, body { height: 100%; overflow: hidden; background-color: var(--background-
 .bubble .text { line-height: 1.4; white-space: pre-wrap; }
 .chat-media { max-width: 100%; border-radius: 10px; margin-top: 5px; }
 .ticks { margin-left: 5px; font-size: 1.1em; font-weight: bold; }
-.composer { display: flex; gap: 8px; align-items: center; padding: clamp(8px, 2vw, 12px); border-top: 1px solid var(--panel-border); flex-shrink: 0; }
-.composer input[type="text"] { flex: 1; padding: 10px 14px; border: none; border-radius: 20px; background: var(--other-bubble-bg); color: var(--text-primary); outline: none; }
-.composer button { width: 40px; height: 40px; border: none; border-radius: 50%; background: var(--accent-color); color: #fff; font-size: 18px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.composer { display: flex; gap: 8px; align-items: flex-end; padding: clamp(8px, 2vw, 12px); border-top: 1px solid var(--panel-border); flex-shrink: 0; }
+.composer textarea {
+  flex: 1;
+  padding: 10px 14px;
+  border: none;
+  border-radius: 20px;
+  background: var(--other-bubble-bg);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: inherit;
+  line-height: 1.4;
+  outline: none;
+  resize: none;
+  overflow-y: auto;
+  max-height: 90px; /* Crucial: stops growing after ~4-5 lines */
+}
+.composer textarea::-webkit-scrollbar { width: 5px; }
+.composer textarea::-webkit-scrollbar-thumb { background-color: var(--panel-border); border-radius: 10px; }
+.composer button { width: 40px; height: 40px; border: none; border-radius: 50%; background: var(--accent-color); color: #fff; font-size: 18px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; cursor: pointer; margin-bottom: 1px; }
 
 /* --- Mobile Responsive Design --- */
 @media(max-width: 768px) {
@@ -350,8 +374,8 @@ html, body { height: 100%; overflow: hidden; background-color: var(--background-
   #backToUsersBtn { display: block; }
 }
 @media (max-width: 768px) and (orientation: landscape) {
-    .composer { padding: 6px 8px; } /* Make composer smaller in landscape */
-    .composer input[type="text"] { padding: 8px 14px; }
+    .composer { padding: 6px 8px; align-items: center; } /* Re-center for landscape */
+    .composer textarea { max-height: 60px; } /* Reduce max height */
     .composer button { width: 36px; height: 36px; }
 }
 </style>
@@ -396,7 +420,7 @@ html, body { height: 100%; overflow: hidden; background-color: var(--background-
     <div class="composer">
       <button id="attachBtn">📎</button>
       <input type="file" id="fileInput" accept="image/*,video/*" hidden/>
-      <input id="textInput" placeholder="Type a message..."/>
+      <textarea id="textInput" placeholder="Type a message..." rows="1"></textarea>
       <button id="sendBtn">➤</button>
     </div>
   </div>
