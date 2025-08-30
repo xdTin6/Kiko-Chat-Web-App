@@ -7,7 +7,7 @@
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-app.js";
     import { getDatabase, ref, push, onChildAdded, remove, set, get, child } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-database.js";
 
-    // 🔥 Your Firebase Config
+    // 🔥 Firebase Config
     const firebaseConfig = {
       apiKey: "AIzaSyAe_ZfZ8rKCke47UeA9Kcs8cXpD6-G6RAQ",
       authDomain: "kiko-chat-b6435.firebaseapp.com",
@@ -29,7 +29,7 @@
 
     let currentUser = null;
 
-    // Login Function
+    // Login
     async function login(username, pass) {
       const snap = await get(child(usersRef, username));
       if (!snap.exists()) {
@@ -53,10 +53,10 @@
       alert(`✅ User "${username}" created!`);
     }
 
-    // Enter chat after login
+    // Enter chat
     function enterChat() {
       document.getElementById("login").style.display = "none";
-      document.getElementById("chat").style.display = "block";
+      document.getElementById("chat").style.display = "flex";
       document.getElementById("welcomeUser").innerText = `Welcome, ${currentUser.name}`;
       loadMessages();
       if (currentUser.role === "admin") {
@@ -64,7 +64,7 @@
       }
     }
 
-    // Send Message
+    // Send message
     document.addEventListener("DOMContentLoaded", () => {
       document.getElementById("sendBtn").addEventListener("click", () => {
         const msg = document.getElementById("messageInput").value;
@@ -101,17 +101,18 @@
       });
     });
 
-    // Load Messages
+    // Load messages
     function loadMessages() {
       onChildAdded(roomRef, (snapshot) => {
         const msg = snapshot.val();
-        const p = document.createElement("p");
-        p.textContent = `${msg.name}: ${msg.text}`;
-        document.getElementById("messages").appendChild(p);
+        const div = document.createElement("div");
+        div.className = "message";
+        div.innerHTML = `<strong>${msg.name}:</strong> ${msg.text}`;
+        document.getElementById("messages").appendChild(div);
       });
     }
 
-    // Auto-login if already stored
+    // Auto login if stored
     window.onload = () => {
       const stored = localStorage.getItem("chat_user");
       if (stored) {
@@ -121,18 +122,54 @@
     }
   </script>
   <style>
-    body { font-family: Arial, sans-serif; background: #f0f2f5; margin:0; padding:0; }
-    #login, #chat { padding: 20px; }
-    #chat { display: none; }
-    #messages { border:1px solid #ccc; height:300px; overflow-y:scroll; padding:10px; background:#fff; }
-    input { padding: 8px; margin: 5px; }
-    button { padding: 8px 12px; margin: 5px; }
-    #adminControls { display: none; margin-top: 20px; padding: 10px; border:1px solid #aaa; background: #fafafa; }
+    body { 
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+      background: #121212; 
+      color: white; 
+      display: flex; 
+      justify-content: center; 
+      align-items: center; 
+      height: 100vh; 
+      margin: 0; 
+    }
+    #login, #chat { 
+      background: #1e1e1e; 
+      padding: 30px; 
+      border-radius: 12px; 
+      box-shadow: 0 4px 15px rgba(0,0,0,0.5); 
+      width: 350px; 
+      text-align: center; 
+    }
+    input, button { 
+      width: 90%; 
+      margin: 10px 0; 
+      padding: 10px; 
+      border-radius: 8px; 
+      border: none; 
+      font-size: 16px; 
+    }
+    input { background: #2c2c2c; color: white; }
+    button { background: #0078ff; color: white; cursor: pointer; }
+    button:hover { background: #005fcc; }
+    #chat { flex-direction: column; display: none; }
+    #messages { 
+      background: #2c2c2c; 
+      flex: 1; 
+      padding: 10px; 
+      margin-bottom: 10px; 
+      border-radius: 8px; 
+      height: 300px; 
+      overflow-y: auto; 
+      text-align: left;
+    }
+    .message { margin: 5px 0; }
+    #adminControls { display: none; margin-top: 20px; text-align: left; }
+    #welcomeUser { margin-bottom: 15px; }
   </style>
 </head>
 <body>
   <div id="login">
-    <h2>🔐 Login</h2>
+    <h2>🔐 Secure Login</h2>
     <input type="text" id="username" placeholder="Username"><br>
     <input type="password" id="passcode" placeholder="Passcode"><br>
     <button id="loginBtn">Login</button>
@@ -141,11 +178,11 @@
   <div id="chat">
     <h2 id="welcomeUser"></h2>
     <div id="messages"></div>
-    <input type="text" id="messageInput" placeholder="Type message...">
+    <input type="text" id="messageInput" placeholder="Type a message...">
     <button id="sendBtn">Send</button>
 
     <div id="adminControls">
-      <h3>👑 Admin Controls</h3>
+      <h3>👑 Admin Panel</h3>
       <input type="text" id="newUsername" placeholder="New Username">
       <input type="password" id="newPass" placeholder="New Passcode">
       <button id="createUserBtn">Create User</button>
