@@ -5,13 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>KikoChat</title>
 
-<!-- Firebase -->
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-app.js";
 import {
   getDatabase, ref as dbRef, push, onChildAdded, remove, set, get, child, update, onValue, onDisconnect
 } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-database.js";
 
+// --- CONFIG & INITIALIZATION ---
 const firebaseConfig = {
   apiKey: "AIzaSyAe_ZfZ8rKCke47UeA9Kcs8cXpD6-G6RAQ",
   authDomain: "kiko-chat-b6435.firebaseapp.com",
@@ -32,47 +32,71 @@ const roomRef = dbRef(db, ROOM_PATH);
 
 let state = { currentUser: null, userMap: {} };
 
-/* Helpers */
+// --- DOM ELEMENTS ---
+const elements = {}; // Object to hold all DOM element references
+
+// --- HELPERS ---
 function mkKey(name){ return String(name||"").trim().toLowerCase(); }
 function colorFromName(name){ let h=0;for(let i=0;i<name.length;i++)h=name.charCodeAt(i)+((h<<5)-h);return `hsl(${Math.abs(h%360)},70%,45%)`; }
 function fmtTime(ts){ return new Date(ts).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}); }
-function lastSeenText(ts){ if(!ts)return"last seen";const d=Math.floor((Date.now()-ts)/1000);if(d<10)return"online";if(d<60)return`${d}s ago`;if(d<3600)return`${Math.floor(d/60)}m ago`;if(d<86400)return`${Math.floor(d/3600)}h ago`;return `${Math.floor(d/86400)}d ago`; }
+function lastSeenText(ts){
+  if(!ts)return "last seen";
+  const d=Math.floor((Date.now()-ts)/1000);
+  if(d<10)return"online";
+  if(d<60)return`${d}s ago`;
+  if(d<3600)return`${Math.floor(d/60)}m ago`;
+  if(d<86400)return`${Math.floor(d/3600)}h ago`;
+  return `${Math.floor(d/86400)}d ago`;
+}
 
-/* Presence */
+// --- PRESENCE ---
 async function setPresence(username){
   const statusRef=dbRef(db,`${USERS_PATH}/${username}/status`);
   await set(statusRef,{online:true,lastSeen:Date.now()});
   onDisconnect(statusRef).set({online:false,lastSeen:Date.now()});
 }
 
-/* Users */
+// --- USERS ---
 async function createUser(username,pass,role="user"){
   const k=mkKey(username); if(!k)return;
   await set(child(usersRef,k),{pass:String(pass),role});
+  alert(`User '${k}' created!`);
+  elements.newUsername.value = '';
+  elements.newPass.value = '';
 }
+
 function updateUsersUI(){
-  const ul=document.getElementById("usersList"); ul.innerHTML="";
+  elements.usersList.innerHTML="";
   for(const [username,info] of Object.entries(state.userMap)){
-    const row=document.createElement("div"); row.className="userItem";
+    const row=document.createElement("div");
+    row.className="userItem";
+    // For mobile: clicking a user shows the chat panel
+    row.onclick = () => {
+      document.body.classList.add('show-chat-panel');
+    };
+
     const av=document.createElement("div"); av.className="miniAvatar"; av.style.background=colorFromName(username); av.textContent=username[0].toUpperCase();
-    const box=document.createElement("div"); box.style.display="flex";box.style.flexDirection="column";
+    const box=document.createElement("div"); box.className="userInfo";
     const nm=document.createElement("div"); nm.className="userName"; nm.textContent=username;
     const st=document.createElement("div"); st.className="userStatus"; st.textContent=info.status&&info.status.online?"online":lastSeenText(info.status?.lastSeen);
-    box.append(nm,st); row.append(av,box); ul.appendChild(row);
+    box.append(nm,st); row.append(av,box); elements.usersList.appendChild(row);
   }
 }
 
-/* Messages */
+// --- MESSAGES ---
 async function sendTextMessage(txt){
-  if(!state.currentUser)return;
-  const msg={type:"text",name:state.currentUser.name,text:txt,ts:Date.now(),
+  if(!state.currentUser || !txt.trim()) return;
+  const msg={type:"text",name:state.currentUser.name,text:txt.trim(),ts:Date.now(),
     deliveredBy:{[state.currentUser.name]:true},seenBy:{}};
   await push(roomRef,msg);
+  elements.textInput.value = ''; // Clear input after sending
 }
+
 async function uploadAndSendFile(file){
-  if(!state.currentUser)return;
+  if(!state.currentUser) return;
   const isImg=file.type.startsWith("image/"),isVid=file.type.startsWith("video/");
-  if(!isImg&&!isVid)return alert("only img/video");
+  if(!isImg&&!isVid)return alert("Only image or video files are supported.");
+
   const reader=new FileReader();
   reader.onload=async e=>{
     const msg={type:isVid?"video":"image",name:state.currentUser.name,
@@ -80,151 +104,292 @@ async function uploadAndSendFile(file){
       deliveredBy:{[state.currentUser.name]:true},seenBy:{}};
     await push(roomRef,msg);
   };
+  // Note: Using Data URLs is simple but inefficient for large files.
+  // For a production app, Firebase Storage is the recommended approach.
   reader.readAsDataURL(file);
 }
+
 async function markDelivered(k){ if(state.currentUser) await set(dbRef(db,`${ROOM_PATH}/${k}/deliveredBy/${state.currentUser.name}`),true);}
 async function markSeen(k){ if(state.currentUser) await set(dbRef(db,`${ROOM_PATH}/${k}/seenBy/${state.currentUser.name}`),true); }
 
 function renderMessage(key,msg){
-  const messages=document.getElementById("messages");
-  const wrap=document.createElement("div"); wrap.className="msgRow "+(msg.name===state.currentUser?.name?"me":"other");
-  const av=document.createElement("div"); av.className="avatar"; av.style.background=colorFromName(msg.name||"?"); av.textContent=(msg.name||"?")[0].toUpperCase();
+  const isMe = msg.name === state.currentUser?.name;
+  const wrap=document.createElement("div");
+  wrap.className = `msgRow ${isMe ? "me" : "other"}`;
+
   const bubble=document.createElement("div"); bubble.className="bubble";
-  const meta=document.createElement("div"); meta.className="meta"; meta.textContent=`${msg.name} · ${fmtTime(msg.ts)}`; bubble.appendChild(meta);
-  if(msg.type==="image"){ const i=document.createElement("img");i.src=msg.data;i.className="chat-img";bubble.appendChild(i);}
-  else if(msg.type==="video"){ const v=document.createElement("video");v.src=msg.data;v.controls=true;v.className="chat-video";bubble.appendChild(v);}
-  else { const t=document.createElement("div");t.textContent=msg.text||"";bubble.appendChild(t);}
-  const ticks=document.createElement("div");ticks.className="ticks";
-  if(state.currentUser&&msg.name===state.currentUser.name){
-    const del=Object.keys(msg.deliveredBy||{}).length, seen=Object.keys(msg.seenBy||{}).filter(u=>u!==msg.name).length;
-    ticks.textContent=seen>0?"✓✓":"✓"; ticks.style.color=seen>0?"#2ea1ff":"#aaa";
+  if(!isMe) {
+    const meta=document.createElement("div"); meta.className="meta name"; meta.textContent=msg.name; meta.style.color = colorFromName(msg.name);
+    bubble.appendChild(meta);
   }
-  bubble.appendChild(ticks);
-  wrap.append(av,bubble); messages.appendChild(wrap); messages.scrollTop=messages.scrollHeight;
-  if(state.currentUser&&msg.name!==state.currentUser.name){ markDelivered(key); markSeen(key); }
+
+  if(msg.type==="image"){ const i=document.createElement("img");i.src=msg.data;i.className="chat-media";bubble.appendChild(i);}
+  else if(msg.type==="video"){ const v=document.createElement("video");v.src=msg.data;v.controls=true;v.className="chat-media";bubble.appendChild(v);}
+  else { const t=document.createElement("div");t.className="text";t.textContent=msg.text||"";bubble.appendChild(t);}
+
+  const footer = document.createElement("div"); footer.className="meta footer";
+  const time = document.createElement("span"); time.textContent = fmtTime(msg.ts);
+  footer.appendChild(time);
+
+  if(isMe){
+    const del=Object.keys(msg.deliveredBy||{}).length, seen=Object.keys(msg.seenBy||{}).filter(u=>u!==msg.name).length;
+    const ticks=document.createElement("span");
+    ticks.className="ticks";
+    ticks.innerHTML = seen > 0 ? '&#10003;&#10003;' : '&#10003;'; // Double vs Single tick
+    ticks.style.color=seen>0?"#4fc3f7":"#a0a0a0";
+    footer.appendChild(ticks);
+  }
+
+  bubble.appendChild(footer);
+  wrap.appendChild(bubble);
+  elements.messages.appendChild(wrap);
+  elements.messages.scrollTop = elements.messages.scrollHeight;
+
+  if(!isMe){ markDelivered(key); markSeen(key); }
 }
 
-/* Listeners */
+// --- LISTENERS ---
 function attachListeners(){
   onChildAdded(roomRef,s=>{renderMessage(s.key,s.val());});
   onValue(usersRef,s=>{if(s.exists()){state.userMap=s.val();updateUsersUI();}});
 }
 
-/* Login */
+// --- LOGIN & SESSION ---
 async function loginFlow(raw,pass){
-  const u=mkKey(raw); const snap=await get(child(usersRef,u));
+  const u=mkKey(raw); if (!u || !pass) return alert("Username and password are required.");
+  const snap=await get(child(usersRef,u));
   if(!snap.exists())return alert("User not found");
-  const d=snap.val(); if(d.pass!==pass)return alert("Wrong pass");
-  state.currentUser={name:u,role:d.role}; localStorage.setItem("chat_user",JSON.stringify(state.currentUser));
-  await setPresence(u);
-  document.getElementById("loginPane").style.display="none";
-  document.getElementById("mainWrap").style.display="grid";
-  document.getElementById("meName").textContent=u; document.getElementById("meRole").textContent=d.role;
-  if(d.role==="admin")document.getElementById("adminPanel").style.display="block";
+  const d=snap.val(); if(d.pass!==pass)return alert("Wrong passcode");
+  
+  const user = {name:u,role:d.role};
+  localStorage.setItem("chat_user",JSON.stringify(user));
+  initChatUI(user);
+}
+
+function initChatUI(user) {
+  state.currentUser=user;
+  setPresence(user.name);
+
+  elements.loginView.style.display="none";
+  elements.mainView.style.display="grid";
+  elements.meName.textContent=user.name;
+  elements.meRole.textContent=user.role;
+  if(user.role==="admin") elements.adminPanel.style.display="flex";
+  
   attachListeners();
 }
 
-/* Restore */
-window.addEventListener("load",async()=>{
-  const stored=localStorage.getItem("chat_user");
-  if(stored){state.currentUser=JSON.parse(stored);await setPresence(state.currentUser.name).catch(()=>{});document.getElementById("loginPane").style.display="none";document.getElementById("mainWrap").style.display="grid";document.getElementById("meName").textContent=state.currentUser.name;document.getElementById("meRole").textContent=state.currentUser.role;attachListeners();}
+// --- GLOBAL INITIALIZATION ---
+function bindEvents() {
+    elements.loginButton.addEventListener('click', () => Kiko.login(elements.usernameLogin.value, elements.passLogin.value));
+    elements.logoutBtn.addEventListener('click', () => { localStorage.clear(); location.reload(); });
+    
+    elements.sendBtn.addEventListener('click', () => Kiko.sendTextMessage(elements.textInput.value));
+    elements.textInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            Kiko.sendTextMessage(elements.textInput.value);
+        }
+    });
+
+    elements.attachBtn.addEventListener('click', () => elements.fileInput.click());
+    elements.fileInput.addEventListener('change', () => { if(elements.fileInput.files[0]) Kiko.uploadAndSendFile(elements.fileInput.files[0])});
+
+    // Admin Panel Events
+    elements.addUserBtn.addEventListener('click', () => Kiko.createUser(elements.newUsername.value, elements.newPass.value));
+    elements.addAdminBtn.addEventListener('click', () => Kiko.createUser(elements.newUsername.value, elements.newPass.value, 'admin'));
+    elements.clearChatBtn.addEventListener('click', () => Kiko.clearChat());
+
+    // Mobile UI event
+    elements.backToUsersBtn.addEventListener('click', () => document.body.classList.remove('show-chat-panel'));
+}
+
+window.addEventListener("load", async ()=>{
+    // Cache all DOM elements
+    elements.loginView = document.getElementById("loginView");
+    elements.mainView = document.getElementById("mainView");
+    elements.usersList = document.getElementById("usersList");
+    elements.messages = document.getElementById("messages");
+    elements.adminPanel = document.getElementById("adminPanel");
+    elements.meName = document.getElementById("meName");
+    elements.meRole = document.getElementById("meRole");
+    elements.usernameLogin = document.getElementById("usernameLogin");
+    elements.passLogin = document.getElementById("passLogin");
+    elements.loginButton = document.getElementById("loginButton");
+    elements.logoutBtn = document.getElementById("logoutBtn");
+    elements.textInput = document.getElementById("textInput");
+    elements.sendBtn = document.getElementById("sendBtn");
+    elements.attachBtn = document.getElementById("attachBtn");
+    elements.fileInput = document.getElementById("fileInput");
+    elements.newUsername = document.getElementById("newUsername");
+    elements.newPass = document.getElementById("newPass");
+    elements.addUserBtn = document.getElementById("addUserBtn");
+    elements.addAdminBtn = document.getElementById("addAdminBtn");
+    elements.clearChatBtn = document.getElementById("clearChatBtn");
+    elements.backToUsersBtn = document.getElementById("backToUsersBtn");
+
+    bindEvents(); // Attach all event listeners
+
+    const stored=localStorage.getItem("chat_user");
+    if(stored){
+        try {
+            const user = JSON.parse(stored);
+            initChatUI(user);
+        } catch(e) {
+            localStorage.clear();
+        }
+    }
 });
 
-window.Kiko={login:loginFlow,createUser,sendTextMessage,uploadAndSendFile,clearChat:async()=>{await remove(roomRef);document.getElementById("messages").innerHTML="";}};
+// --- EXPORT TO WINDOW ---
+window.Kiko = {
+    login: loginFlow,
+    createUser,
+    sendTextMessage,
+    uploadAndSendFile,
+    clearChat: async () => {
+        if (confirm("Are you sure you want to clear all messages?")) {
+            await remove(roomRef);
+            document.getElementById("messages").innerHTML="";
+        }
+    }
+};
 </script>
 
 <style>
-/* 🎨 Polished Glassmorphism UI */
-*{box-sizing:border-box;margin:0;padding:0;font-family:"Inter",system-ui,sans-serif;}
-body,html{height:100%;overflow:hidden;}
-body{
-  display:flex;align-items:center;justify-content:center;
-  background:linear-gradient(-45deg,#1e1e2f,#232346,#0b0d10,#111827);
-  background-size:400% 400%;animation:gradientMove 18s ease infinite;
-  color:#fff;
+/* --- Global Styles & Variables --- */
+:root {
+  --background-dark: #121212;
+  --panel-bg: #1e1e1e;
+  --panel-border: #2c2c2c;
+  --text-primary: #e0e0e0;
+  --text-secondary: #a0a0a0;
+  --accent-color: #0277bd;
+  --accent-hover: #039be5;
+  --my-bubble-bg: #0277bd;
+  --other-bubble-bg: #373737;
+  --online-indicator: #4caf50;
 }
-@keyframes gradientMove{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}
-#mainWrap,#loginCard{
-  backdrop-filter:blur(20px) saturate(160%);
-  -webkit-backdrop-filter:blur(20px) saturate(160%);
-  background:rgba(255,255,255,0.08);
-  border-radius:24px;border:1px solid rgba(255,255,255,0.15);
-  box-shadow:0 8px 30px rgba(0,0,0,0.4);
+* { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+html, body { height: 100%; overflow: hidden; background-color: var(--background-dark); color: var(--text-primary); }
+
+/* --- Login View --- */
+#loginView { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
+.loginCard { background: var(--panel-bg); padding: 32px; width: 90%; max-width: 360px; border-radius: 16px; text-align: center; border: 1px solid var(--panel-border); }
+.logoWrap { display: flex; align-items: center; gap: 12px; justify-content: center; margin-bottom: 24px; }
+.logoCat { width: 50px; height: 50px; border-radius: 16px; background: var(--accent-color); display: flex; align-items: center; justify-content: center; font-size: 28px; }
+.logoText { font-size: 24px; font-weight: 700; }
+.loginCard input { width: 100%; padding: 12px 14px; margin: 8px 0; border: 1px solid var(--panel-border); border-radius: 10px; background: var(--background-dark); color: var(--text-primary); font-size: 15px; outline: none; }
+.loginCard input:focus { border-color: var(--accent-color); }
+.loginCard button { margin-top: 12px; width: 100%; padding: 12px; border: none; border-radius: 10px; background: var(--accent-color); color: #fff; font-weight: 600; font-size: 15px; cursor: pointer; transition: background-color 0.2s; }
+.loginCard button:hover { background: var(--accent-hover); }
+
+/* --- Main Chat View (Desktop) --- */
+#mainView { width: 100%; height: 100%; display: grid; grid-template-columns: 320px 1fr; }
+.leftPanel, .rightPanel { display: flex; flex-direction: column; background: var(--panel-bg); height: 100%; }
+.leftPanel { border-right: 1px solid var(--panel-border); }
+.panelHeader { padding: 12px 16px; border-bottom: 1px solid var(--panel-border); display: flex; align-items: center; gap: 12px; font-weight: 600; }
+.panelHeader .logoCat { width: 40px; height: 40px; font-size: 24px; border-radius: 12px; }
+.panelHeader .logoText { font-size: 18px; }
+#usersList { flex: 1; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 4px; }
+.userItem { display: flex; align-items: center; gap: 12px; padding: 10px; border-radius: 10px; cursor: pointer; transition: background-color 0.2s; }
+.userItem:hover, .userItem.active { background: rgba(255, 255, 255, 0.05); }
+.miniAvatar { width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-weight: 700; color: #fff; }
+.userInfo { flex: 1; }
+.userName { font-weight: 600; }
+.userStatus { font-size: 13px; color: var(--text-secondary); }
+.userStatus:is(:has-text("online")) { color: var(--online-indicator); } /* CSS4, might not be fully supported */
+.userItem:has(.userStatus:is(:has-text("online"))) .userName { color: var(--online-indicator); } /* same */
+
+/* Admin Panel */
+#adminPanel { flex-wrap: wrap; gap: 8px; padding: 12px; border-top: 1px solid var(--panel-border); background: var(--background-dark); }
+#adminPanel input { flex: 1 1 100px; padding: 8px; border-radius: 8px; border: 1px solid var(--panel-border); background: var(--panel-bg); color: var(--text-primary); }
+#adminPanel button { padding: 8px 12px; border-radius: 8px; border: none; cursor: pointer; font-weight: 500; background: #444; color: #fff; }
+#adminPanel button:hover { background: #555; }
+#adminPanel button:last-of-type { background: #c62828; }
+
+/* Right Panel (Chat Area) */
+.topbar { padding: 0 16px; height: 60px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--panel-border); flex-shrink: 0; }
+#backToUsersBtn { display: none; background: none; border: none; color: var(--text-primary); font-size: 24px; cursor: pointer; margin-right: 12px; }
+#meInfo strong { font-size: 16px; }
+#meInfo span { color: var(--text-secondary); font-size: 13px; margin-left: 4px; }
+#logoutBtn { background: #c62828; padding: 8px 14px; border-radius: 8px; border: none; color: #fff; cursor: pointer; }
+#messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 4px; background-image: url('https://i.imgur.com/fXEo5vW.png'); background-size: 412.5px 749.25px; }
+.msgRow { display: flex; max-width: 75%; margin-bottom: 12px; }
+.msgRow.me { align-self: flex-end; }
+.msgRow.other { align-self: flex-start; }
+.bubble { padding: 8px 12px; border-radius: 18px; color: var(--text-primary); max-width: 100%; word-wrap: break-word; }
+.msgRow.me .bubble { background: var(--my-bubble-bg); border-bottom-right-radius: 4px; }
+.msgRow.other .bubble { background: var(--other-bubble-bg); border-bottom-left-radius: 4px; }
+.bubble .meta { font-size: 12px; opacity: 0.8; }
+.bubble .meta.name { font-weight: 600; margin-bottom: 4px; }
+.bubble .meta.footer { text-align: right; margin-top: 6px; }
+.bubble .text { font-size: 15px; line-height: 1.4; white-space: pre-wrap; }
+.chat-media { max-width: 100%; border-radius: 12px; margin-top: 6px; }
+.ticks { margin-left: 6px; font-size: 14px; font-weight: bold; }
+.composer { display: flex; gap: 10px; align-items: center; padding: 12px; border-top: 1px solid var(--panel-border); flex-shrink: 0; }
+.composer input[type="text"] { flex: 1; padding: 12px 16px; border: none; border-radius: 22px; background: var(--other-bubble-bg); color: var(--text-primary); font-size: 15px; outline: none; }
+.composer button { width: 44px; height: 44px; border: none; border-radius: 50%; background: var(--accent-color); color: #fff; font-weight: 600; cursor: pointer; transition: background-color 0.2s; font-size: 20px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+.composer button:hover { background: var(--accent-hover); }
+
+/* --- Mobile Responsive Design --- */
+@media(max-width: 768px) {
+  #mainView { grid-template-columns: 1fr; }
+  .leftPanel, .rightPanel { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transition: transform 0.3s ease-in-out; }
+  .leftPanel { z-index: 10; }
+  .rightPanel { transform: translateX(100%); z-index: 20; }
+  body.show-chat-panel .leftPanel { transform: translateX(-100%); }
+  body.show-chat-panel .rightPanel { transform: translateX(0); }
+  .topbar { padding: 0 8px 0 0; }
+  #backToUsersBtn { display: block; }
 }
-.logoWrap{display:flex;align-items:center;gap:12px;justify-content:center;margin-bottom:20px}
-.logoCat{width:64px;height:64px;border-radius:20px;background:#5b9dff;display:flex;align-items:center;justify-content:center;font-size:34px;animation:bounce 2.5s infinite;box-shadow:0 4px 12px rgba(0,0,0,.4);}
-@keyframes bounce{0%,20%,50%,80%,100%{transform:translateY(0)}40%{transform:translateY(-10px)}60%{transform:translateY(-5px)}}
-.logoText{font-size:28px;font-weight:800;letter-spacing:1px}
-#loginPane{display:flex;align-items:center;justify-content:center;width:100%;height:100%}
-#loginCard{padding:32px;width:360px;text-align:center}
-#loginCard input{width:100%;padding:12px 14px;margin:8px 0;border:none;border-radius:18px;background:rgba(255,255,255,.12);color:#fff;font-size:15px;outline:none;}
-#loginCard button{margin-top:12px;width:100%;padding:12px;border:none;border-radius:18px;background:#5b9dff;color:#fff;font-weight:600;font-size:15px;cursor:pointer;box-shadow:0 4px 10px rgba(0,0,0,.4);transition:0.25s;}
-#loginCard button:hover{background:#4786e6;}
-#mainWrap{width:96%;height:90vh;display:grid;grid-template-columns:260px 1fr;gap:18px;padding:18px;}
-.leftPanel,.rightPanel{backdrop-filter:blur(20px) saturate(160%);background:rgba(255,255,255,0.08);border-radius:20px;border:1px solid rgba(255,255,255,0.15);box-shadow:0 8px 30px rgba(0,0,0,0.35);}
-.leftPanel{display:flex;flex-direction:column;overflow:hidden}
-#usersList{flex:1;overflow:auto;padding:12px;display:flex;flex-direction:column;gap:10px}
-.userItem{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:16px;cursor:pointer;transition:0.25s;}
-.userItem:hover{background:rgba(255,255,255,0.08);}
-.miniAvatar{width:40px;height:40px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;background:#5b9dff;}
-.userName{font-weight:600;}
-.userStatus{font-size:12px;color:#aaa}
-.rightPanel{display:flex;flex-direction:column;}
-.topbar{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid rgba(255,255,255,0.1);}
-#messages{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px;}
-.msgRow{display:flex;gap:12px;align-items:flex-end;max-width:75%}
-.msgRow.me{margin-left:auto;flex-direction:row-reverse}
-.avatar{width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;background:#5b9dff;flex-shrink:0;}
-.bubble{padding:12px 16px;border-radius:20px;background:rgba(255,255,255,0.12);color:#fff;box-shadow:0 4px 14px rgba(0,0,0,0.25);max-width:420px;}
-.msgRow.me .bubble{background:#5b9dff;color:#fff}
-.meta{font-size:12px;color:#bbb;margin-bottom:6px}
-.chat-img,.chat-video{max-width:100%;border-radius:12px;margin-top:6px}
-.ticks{margin-left:8px;font-size:12px;opacity:0.9}
-.composer{display:flex;gap:10px;align-items:center;padding:12px 16px;border-top:1px solid rgba(255,255,255,0.1);}
-.composer input{flex:1;padding:12px;border:none;border-radius:16px;background:rgba(255,255,255,0.12);color:#fff;font-size:15px;outline:none;}
-.composer button{padding:12px 16px;border:none;border-radius:16px;background:#5b9dff;color:#fff;font-weight:600;cursor:pointer;transition:0.25s;}
-.composer button:hover{background:#4786e6;}
-@media(max-width:900px){#mainWrap{grid-template-columns:1fr}.leftPanel{display:none}}
 </style>
 </head>
 <body>
 
-<!-- Login -->
-<div id="loginPane">
-  <div id="loginCard">
+<div id="loginView">
+  <div class="loginCard">
     <div class="logoWrap"><div class="logoCat">🐱</div><div class="logoText">KikoChat</div></div>
     <input id="usernameLogin" placeholder="Username"/>
     <input id="passLogin" type="password" placeholder="Passcode"/>
-    <button onclick="Kiko.login(usernameLogin.value,passLogin.value)">Login</button>
+    <button id="loginButton">Login</button>
   </div>
 </div>
 
-<!-- Chat -->
-<div id="mainWrap" style="display:none">
+<div id="mainView" style="display:none">
   <div class="leftPanel">
-    <div class="logoWrap" style="margin:16px auto;"><div class="logoCat">🐱</div><div class="logoText" style="font-size:20px">KikoChat</div></div>
+    <div class="panelHeader">
+        <div class="logoCat">🐱</div>
+        <div class="logoText">KikoChat</div>
+    </div>
     <div id="usersList"></div>
-    <div id="adminPanel" style="display:none;padding:10px">
-      <input id="newUsername" placeholder="username"/><input id="newPass" placeholder="pass"/>
-      <button onclick="Kiko.createUser(newUsername.value,newPass.value)">+User</button>
-      <button onclick="Kiko.createUser(newUsername.value,newPass.value,'admin')">+Admin</button>
-      <button onclick="Kiko.clearChat()">Clear Chat</button>
+    <div id="adminPanel" style="display:none">
+      <input id="newUsername" placeholder="username"/>
+      <input id="newPass" placeholder="pass"/>
+      <button id="addUserBtn">+ User</button>
+      <button id="addAdminBtn">+ Admin</button>
+      <button id="clearChatBtn">Clear Chat</button>
     </div>
   </div>
   <div class="rightPanel">
-    <div class="topbar"><div><strong id="meName"></strong> <span id="meRole" style="color:#bbb;font-size:14px"></span></div><button id="logoutBtn" style="background:#ff4d6d;padding:8px 14px;border-radius:14px;border:none;color:#fff;cursor:pointer;" onclick="localStorage.clear();location.reload()">Logout</button></div>
+    <div class="topbar">
+      <div style="display: flex; align-items: center;">
+        <button id="backToUsersBtn" aria-label="Back to users list">&larr;</button>
+        <div id="meInfo">
+            <strong id="meName"></strong> <span id="meRole"></span>
+        </div>
+      </div>
+      <button id="logoutBtn">Logout</button>
+    </div>
     <div id="messages"></div>
     <div class="composer">
-      <input id="textInput" placeholder="Type message"/>
-      <button onclick="Kiko.sendTextMessage(textInput.value);textInput.value=''">Send</button>
+      <button id="attachBtn">📎</button>
       <input type="file" id="fileInput" accept="image/*,video/*" hidden/>
-      <button onclick="fileInput.click()">📎</button>
+      <input id="textInput" placeholder="Type a message..."/>
+      <button id="sendBtn">➤</button>
     </div>
   </div>
 </div>
 
-<script>
-fileInput.onchange=()=>{if(fileInput.files[0])Kiko.uploadAndSendFile(fileInput.files[0])};
-</script>
 </body>
 </html>
