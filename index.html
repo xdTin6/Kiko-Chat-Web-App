@@ -325,10 +325,8 @@ html, body { height: 100%; overflow: hidden; background-color: var(--background-
   display: flex; 
   flex-direction: column; 
   gap: 4px; 
-  background-image: url('https://i.imgur.com/fXEo5vW.png'); 
-  background-position: center;
-  background-size: cover;
-  background-attachment: fixed;
+  background-color: var(--background-dark); /* CHANGED: Solid background color */
+  min-height: 0; /* ADDED: Ensures proper flexbox shrinking */
 }
 .msgRow { display: flex; max-width: 75%; margin-bottom: 10px; }
 .msgRow.me { align-self: flex-end; }
