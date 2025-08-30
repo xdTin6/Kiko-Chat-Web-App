@@ -1,300 +1,523 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Kiko Chat</title>
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-app.js";
-    import { getDatabase, ref, push, onChildAdded, remove, set, get, child } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-database.js";
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Kiko Chat — Dashboard</title>
 
-    // 🔥 Firebase Config
-    const firebaseConfig = {
-      apiKey: "AIzaSyAe_ZfZ8rKCke47UeA9Kcs8cXpD6-G6RAQ",
-      authDomain: "kiko-chat-b6435.firebaseapp.com",
-      databaseURL: "https://kiko-chat-b6435-default-rtdb.firebaseio.com",
-      projectId: "kiko-chat-b6435",
-      storageBucket: "kiko-chat-b6435.firebasestorage.app",
-      messagingSenderId: "896370793240",
-      appId: "1:896370793240:web:3f14442a5d80cd71fb1c6d",
-      measurementId: "G-FB55ZBH15N"
-    };
+<!-- Firebase (v10 modules via CDN) -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-app.js";
+  import {
+    getDatabase, ref as dbRef, push, onChildAdded, remove, set, get, child, update
+  } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-database.js";
+  import {
+    getStorage, ref as storageRef, uploadBytes, getDownloadURL
+  } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-storage.js";
 
-    // Init Firebase
-    const app = initializeApp(firebaseConfig);
-    const db = getDatabase(app);
+  // --------- YOUR FIREBASE CONFIG (keep yours) -------------
+  const firebaseConfig = {
+    apiKey: "AIzaSyAe_ZfZ8rKCke47UeA9Kcs8cXpD6-G6RAQ",
+    authDomain: "kiko-chat-b6435.firebaseapp.com",
+    databaseURL: "https://kiko-chat-b6435-default-rtdb.firebaseio.com",
+    projectId: "kiko-chat-b6435",
+    storageBucket: "kiko-chat-b6435.firebasestorage.app",
+    messagingSenderId: "896370793240",
+    appId: "1:896370793240:web:3f14442a5d80cd71fb1c6d",
+    measurementId: "G-FB55ZBH15N"
+  };
+  // ---------------------------------------------------------
 
-    // References
-    const usersRef = ref(db, "users");
-    const roomRef = ref(db, "rooms/room1/messages");
+  const app = initializeApp(firebaseConfig);
+  const db = getDatabase(app);
+  const storage = getStorage(app);
 
-    let currentUser = null;
+  // DB refs
+  const usersRef = dbRef(db, "users");
+  const roomRef = dbRef(db, "rooms/room1/messages");
 
-    // Generate color per user
-    function colorFromName(name) {
-      let hash = 0;
-      for (let i = 0; i < name.length; i++) {
-        hash = name.charCodeAt(i) + ((hash << 5) - hash);
-      }
-      const hue = Math.abs(hash % 360);
-      return `hsl(${hue}, 70%, 50%)`;
-    }
+  // UI elements we'll reference
+  let state = { currentUser: null };
 
-    // Login
-    async function login(username, pass) {
+  // small helper to compute avatar color
+  function colorFromName(name) {
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    const hue = Math.abs(hash % 360);
+    return `hsl(${hue}, 70%, 45%)`;
+  }
+
+  // --------------------- AUTH / USER ------------------------
+  async function login(username, pass) {
+    try {
       const snap = await get(child(usersRef, username));
-      if (!snap.exists()) {
-        alert("User not found!");
-        return false;
-      }
+      if (!snap.exists()) { alert("User not found"); return false; }
       const data = snap.val();
-      if (data.pass !== pass) {
-        alert("Wrong passcode!");
-        return false;
-      }
-      currentUser = { name: username, role: data.role };
-      localStorage.setItem("chat_user", JSON.stringify(currentUser));
-      enterChat();
+      if (String(data.pass) !== String(pass)) { alert("Wrong passcode"); return false; }
+      state.currentUser = { name: username, role: data.role, avatar: data.avatar || null };
+      localStorage.setItem("chat_user", JSON.stringify(state.currentUser));
+      afterLogin();
       return true;
-    }
+    } catch (e) { console.error(e); alert("Login error"); return false; }
+  }
 
-    // Admin create user
-    async function createUser(username, pass, role="user") {
-      await set(child(usersRef, username), { pass, role });
-      alert(`✅ User "${username}" created!`);
-    }
+  async function createUser(username, pass, role="user") {
+    if (!username) { alert("Enter username"); return; }
+    await set(child(usersRef, username), { pass, role });
+    alert("User created: " + username);
+    loadUsersList(); // refresh list
+  }
 
-    // Enter chat
-    function enterChat() {
-      document.getElementById("login").style.display = "none";
-      document.getElementById("chat").style.display = "flex";
-      document.getElementById("welcomeUser").innerText = currentUser.name;
-      loadMessages();
-      if (currentUser.role === "admin") {
-        document.getElementById("adminControls").style.display = "block";
-      }
-    }
+  async function setUserAvatar(username, file) {
+    const path = `users/${username}_${Date.now()}_${file.name}`;
+    const sRef = storageRef(storage, path);
+    await uploadBytes(sRef, file);
+    const url = await getDownloadURL(sRef);
+    await update(child(usersRef, username), { avatar: url });
+    if (state.currentUser && state.currentUser.name === username) state.currentUser.avatar = url;
+    loadUsersList();
+    return url;
+  }
 
-    // Send message
-    document.addEventListener("DOMContentLoaded", () => {
-      document.getElementById("sendBtn").addEventListener("click", sendMessage);
-      document.getElementById("messageInput").addEventListener("keypress", e => {
-        if (e.key === "Enter" && !e.shiftKey) {
-          e.preventDefault();
-          sendMessage();
-        }
-      });
-
-      document.getElementById("loginBtn").addEventListener("click", () => {
-        const username = document.getElementById("username").value;
-        const pass = document.getElementById("passcode").value;
-        login(username, pass);
-      });
-
-      document.getElementById("createUserBtn").addEventListener("click", () => {
-        if (currentUser.role !== "admin") {
-          alert("❌ Only admin can create users");
-          return;
-        }
-        const newUser = document.getElementById("newUsername").value;
-        const newPass = document.getElementById("newPass").value;
-        createUser(newUser, newPass, "user");
-      });
-
-      document.getElementById("clearBtn").addEventListener("click", async () => {
-        if (currentUser.role !== "admin") {
-          alert("❌ Only admin can clear chat");
-          return;
-        }
-        if (confirm("Clear all messages?")) {
-          await remove(roomRef);
-          document.getElementById("messages").innerHTML = "";
-        }
-      });
-
-      // Theme toggle
-      document.getElementById("themeToggle").addEventListener("click", () => {
-        document.body.classList.toggle("light");
-        localStorage.setItem("theme", document.body.classList.contains("light") ? "light" : "dark");
-      });
+  // ------------------ MESSAGES & UPLOAD --------------------
+  async function sendText(text) {
+    if (!state.currentUser) return alert("Please login");
+    await push(roomRef, {
+      type: "text",
+      name: state.currentUser.name,
+      text: text.trim(),
+      ts: Date.now()
     });
+  }
 
-    // Send message helper
-    function sendMessage() {
-      const msg = document.getElementById("messageInput").value;
-      if (msg.trim() === "") return;
-      push(roomRef, { name: currentUser.name, text: msg });
-      document.getElementById("messageInput").value = "";
+  async function uploadAndSendFile(file) {
+    if (!state.currentUser) return alert("Please login");
+    const isVideo = file.type.startsWith("video/");
+    const isImage = file.type.startsWith("image/");
+    if (!isImage && !isVideo) { alert("Only images and videos allowed"); return; }
+
+    // create storage path and upload
+    const path = `messages/${Date.now()}_${state.currentUser.name}_${file.name}`;
+    const sRef = storageRef(storage, path);
+    await uploadBytes(sRef, file);
+    const url = await getDownloadURL(sRef);
+
+    await push(roomRef, {
+      type: isVideo ? "video" : "image",
+      name: state.currentUser.name,
+      url,
+      filename: file.name,
+      ts: Date.now()
+    });
+  }
+
+  async function clearChat() {
+    if (!state.currentUser || state.currentUser.role !== "admin") return alert("Admin only");
+    if (!confirm("Clear all messages?")) return;
+    await remove(roomRef);
+    document.getElementById("messages").innerHTML = "";
+  }
+
+  // ------------------ UI: render messages -------------------
+  function renderMessage(msg) {
+    const messages = document.getElementById("messages");
+    const wrap = document.createElement("div");
+    wrap.className = "msgRow " + (msg.name === state.currentUser?.name ? "me" : "other");
+
+    // avatar
+    const avatar = document.createElement("div");
+    avatar.className = "avatar";
+    avatar.textContent = (msg.name || "?").slice(0,1).toUpperCase();
+
+    // try to fetch avatar url from users list (map)
+    if (window._userMap && window._userMap[msg.name] && window._userMap[msg.name].avatar) {
+      avatar.style.backgroundImage = `url('${window._userMap[msg.name].avatar}')`;
+      avatar.style.backgroundSize = "cover";
+      avatar.textContent = "";
+    } else {
+      avatar.style.background = colorFromName(msg.name || "anon");
     }
 
-    // Load messages
-    function loadMessages() {
-      onChildAdded(roomRef, (snapshot) => {
-        const msg = snapshot.val();
-        const wrapper = document.createElement("div");
-        wrapper.className = `msgRow ${msg.name === currentUser.name ? "me" : "other"}`;
+    // bubble
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.textContent = `${msg.name} · ${new Date(msg.ts||Date.now()).toLocaleTimeString()}`;
+    bubble.appendChild(meta);
 
-        // Avatar
-        const avatar = document.createElement("div");
-        avatar.className = "avatar";
-        avatar.style.background = colorFromName(msg.name);
-        avatar.textContent = msg.name[0].toUpperCase();
-
-        // Bubble
-        const bubble = document.createElement("div");
-        bubble.className = "bubble";
-        bubble.innerHTML = `<span class="meta">${msg.name}</span><p>${msg.text}</p>`;
-
-        wrapper.appendChild(avatar);
-        wrapper.appendChild(bubble);
-
-        const messages = document.getElementById("messages");
-        messages.appendChild(wrapper);
-        messages.scrollTop = messages.scrollHeight;
-      });
+    if (!msg.type || msg.type === "text") {
+      const p = document.createElement("div");
+      p.className = "text";
+      p.textContent = msg.text || "";
+      bubble.appendChild(p);
+    } else if (msg.type === "image") {
+      const img = document.createElement("img");
+      img.className = "chat-img";
+      img.src = msg.url;
+      img.alt = msg.filename || "image";
+      img.loading = "lazy";
+      bubble.appendChild(img);
+    } else if (msg.type === "video") {
+      const vid = document.createElement("video");
+      vid.className = "chat-video";
+      vid.src = msg.url;
+      vid.controls = true;
+      bubble.appendChild(vid);
     }
 
-    // Auto login + theme restore + wallpaper load
-    window.onload = () => {
-      const stored = localStorage.getItem("chat_user");
-      if (stored) {
-        currentUser = JSON.parse(stored);
-        enterChat();
-      }
-      if (localStorage.getItem("theme") === "light") {
-        document.body.classList.add("light");
-      }
+    wrap.appendChild(avatar);
+    wrap.appendChild(bubble);
+    messages.appendChild(wrap);
+    messages.scrollTop = messages.scrollHeight;
+  }
 
-      // Load wallpaper from /content/wallpaper.jpg if exists
-      const bg = new Image();
-      bg.src = "content/wallpaper.jpg";
-      bg.onload = () => {
-        document.getElementById("chat").style.backgroundImage = `url(${bg.src})`;
-        document.getElementById("chat").style.backgroundSize = "cover";
-        document.getElementById("chat").style.backgroundPosition = "center";
-      }
+  // ------------------ Live stream ---------------------------
+  function attachMessageListener() {
+    onChildAdded(roomRef, snapshot => {
+      const msg = snapshot.val();
+      renderMessage(msg);
+    });
+  }
+
+  // ------------------ USER LIST -----------------------------
+  async function loadUsersList() {
+    // read all users and build a simple map
+    const snap = await get(dbRef(db, "users"));
+    const usersDiv = document.getElementById("usersList");
+    usersDiv.innerHTML = "";
+    window._userMap = {};
+    if (!snap.exists()) return;
+    const data = snap.val();
+    for (const [username, info] of Object.entries(data)) {
+      window._userMap[username] = info;
+      const li = document.createElement("div");
+      li.className = "userItem";
+      const av = document.createElement("div");
+      av.className = "miniAvatar";
+      if (info.avatar) {
+        av.style.backgroundImage = `url('${info.avatar}')`; av.style.backgroundSize = "cover";
+      } else av.style.background = colorFromName(username);
+      const nm = document.createElement("div"); nm.textContent = username;
+      li.appendChild(av); li.appendChild(nm);
+      usersDiv.appendChild(li);
     }
-  </script>
-  <style>
-    :root {
-      --bg: #121212;
-      --panel: rgba(30,30,30,0.9);
-      --bubble-me: #0078ff;
-      --bubble-other: #2c2c2c;
-      --text: #fff;
-      --muted: #aaa;
+  }
+
+  // ------------------ AFTER LOGIN --------------------------
+  function afterLogin() {
+    // hide login panel, show dashboard
+    document.getElementById("loginPane").style.display = "none";
+    document.getElementById("dashboard").style.display = "grid";
+    document.getElementById("meName").textContent = state.currentUser.name;
+    if (state.currentUser.role === "admin") {
+      document.getElementById("adminPanel").style.display = "block";
+    } else {
+      document.getElementById("adminPanel").style.display = "none";
     }
-    body.light {
-      --bg: #f5f5f5;
-      --panel: rgba(255,255,255,0.9);
-      --bubble-me: #0078ff;
-      --bubble-other: #e0e0e0;
-      --text: #000;
-      --muted: #555;
+    // load users & listen messages
+    loadUsersList();
+    attachMessageListener();
+  }
+
+  // ------------------ Import helpers exposed for UI -----------
+  window._chat = {
+    login: async (u,p) => await login(u,p),
+    createUser: async (u,p) => await createUser(u,p,"user"),
+    createAdmin: async (u,p) => await createUser(u,p,"admin"),
+    setUserAvatar: async (u,file) => await setUserAvatar(u,file),
+    uploadAndSendFile: async (file) => await uploadAndSendFile(file),
+    sendText: async (t) => await sendText(t),
+    clearChat: async () => await clearChat(),
+    loadUsersList: loadUsersList
+  };
+
+  // restore saved login if any
+  window.addEventListener("load", () => {
+    const stored = localStorage.getItem("chat_user");
+    if (stored) {
+      state.currentUser = JSON.parse(stored);
+      afterLogin();
     }
-    body {
-      font-family: 'Segoe UI', sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      margin: 0;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      height: 100vh;
-    }
-    #login, #chat {
-      background: var(--panel);
-      padding: 20px;
-      border-radius: 16px;
-      width: 420px;
-      box-shadow: 0 4px 15px rgba(0,0,0,0.5);
-      backdrop-filter: blur(10px);
-    }
-    input, button, textarea {
-      width: 100%;
-      margin: 8px 0;
-      padding: 10px;
-      border-radius: 8px;
-      border: none;
-      font-size: 15px;
-    }
-    input, textarea { background: var(--bubble-other); color: var(--text); }
-    button { background: var(--bubble-me); color: white; cursor: pointer; }
-    button:hover { opacity: 0.9; }
-    #chat {
-      display: none;
-      flex-direction: column;
-      height: 85vh;
-    }
-    header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 10px;
-    }
-    #messages {
-      flex: 1;
-      overflow-y: auto;
-      padding: 10px;
-      margin-bottom: 10px;
-      border-radius: 12px;
-    }
-    .msgRow {
-      display: flex;
-      align-items: flex-end;
-      margin-bottom: 8px;
-      gap: 8px;
-    }
-    .msgRow.me { flex-direction: row-reverse; }
-    .avatar {
-      width: 36px;
-      height: 36px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: white;
-      font-weight: bold;
-      flex-shrink: 0;
-    }
-    .bubble {
-      max-width: 70%;
-      padding: 10px 14px;
-      border-radius: 12px;
-      line-height: 1.4;
-      background: var(--bubble-other);
-      color: var(--text);
-      animation: fadeIn 0.2s ease-in;
-    }
-    .msgRow.me .bubble { background: var(--bubble-me); color: white; }
-    .meta { font-size: 11px; font-weight: bold; display: block; margin-bottom: 4px; }
-    #adminControls { display: none; margin-top: 10px; }
-    @keyframes fadeIn { from {opacity:0; transform:translateY(5px);} to {opacity:1; transform:translateY(0);} }
-  </style>
+    // theme from localStorage
+    if (localStorage.getItem("theme") === "light") document.documentElement.classList.add("light");
+    // try wallpaper in content folder (gh-pages)
+    const img = new Image();
+    img.src = "content/wallpaper.jpg";
+    img.onload = () => {
+      document.getElementById("mainWrap").style.backgroundImage = `url('${img.src}')`;
+      document.getElementById("mainWrap").classList.add("hasWallpaper");
+    };
+  });
+</script>
+
+<!-- ====== STYLES (Dark Dashboard inspired by Dribbble) ====== -->
+<style>
+  :root{
+    --bg:#0b0d10; --panel:rgba(18,18,20,0.8); --accent:#5b9dff; --muted:#9aa3b2; --glass: rgba(255,255,255,0.03);
+  }
+  :root.light{
+    --bg:#f5f7fa; --panel:rgba(255,255,255,0.85); --accent:#2563eb; --muted:#52606d; --glass: rgba(0,0,0,0.03);
+  }
+  *{box-sizing:border-box;font-family:Inter, ui-sans-serif, system-ui;}
+  body{margin:0;background:var(--bg);color:#e8eef8;height:100vh;display:flex;align-items:center;justify-content:center}
+  #mainWrap{width:94%;height:90vh;border-radius:12px;overflow:hidden;display:grid;grid-template-columns:260px 1fr;gap:18px;padding:18px;background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.05));}
+  #mainWrap.hasWallpaper{background-size:cover;background-position:center;}
+  /* Left column (users / controls) */
+  .left{
+    background:var(--panel);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:12px;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.5);
+  }
+  .brand{display:flex;align-items:center;gap:10px}
+  .logo{width:44px;height:44px;border-radius:10px;background:var(--accent);display:flex;align-items:center;justify-content:center;font-weight:700;color:white}
+  .smallMuted{color:var(--muted);font-size:13px}
+  #usersList{flex:1;overflow:auto;padding-top:8px;display:flex;flex-direction:column;gap:8px}
+  .userItem{display:flex;align-items:center;gap:10px;padding:6px;border-radius:8px;cursor:default}
+  .userItem:hover{background:var(--glass)}
+  .miniAvatar{width:38px;height:38px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:white;font-weight:700}
+  .controls{display:flex;flex-direction:column;gap:8px}
+  .controls input[type="file"]{display:none}
+
+  /* Right column (chat) */
+  .right{
+    display:flex;flex-direction:column;gap:12px;
+  }
+  .topbar{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-radius:10px;background:var(--panel)}
+  .top-left{display:flex;gap:12px;align-items:center}
+  #meName{font-weight:700}
+  .actions{display:flex;gap:8px;align-items:center}
+  .actions button{background:transparent;border:1px solid rgba(255,255,255,0.06);padding:8px;border-radius:8px;color:var(--muted);cursor:pointer}
+  .chatPanel{flex:1;background:transparent;border-radius:10px;display:flex;flex-direction:column;overflow:hidden}
+  #messages{flex:1;overflow:auto;padding:18px;display:flex;flex-direction:column;gap:12px}
+  .msgRow{display:flex;gap:12px;align-items:flex-end;max-width:85%}
+  .msgRow.me{margin-left:auto;flex-direction:row-reverse}
+  .avatar{width:48px;height:48px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;font-weight:700;flex-shrink:0}
+  .bubble{padding:10px 14px;border-radius:12px;background:rgba(255,255,255,0.04);max-width:620px;color:var(--text)}
+  .msgRow.me .bubble{background:var(--accent);color:white}
+  .meta{font-size:12px;color:var(--muted);margin-bottom:6px}
+  .chat-img{max-width:420px;border-radius:8px;display:block}
+  .chat-video{max-width:420px;border-radius:8px;display:block}
+  .composer{display:flex;gap:8px;padding:12px;border-radius:10px;background:var(--panel);align-items:center}
+  .composer input[type="text"], .composer textarea{flex:1;padding:10px;border-radius:8px;border: none;background: rgba(255,255,255,0.03);color:inherit}
+  .composer button{padding:10px 14px;border-radius:8px;border:none;background:var(--accent);color:#fff;cursor:pointer}
+
+  /* admin panel */
+  #adminPanel{display:none;padding:10px;border-radius:8px;background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.02))}
+  #adminPanel input{width:100%;padding:8px;margin:6px 0;border-radius:6px;border:none;background:rgba(255,255,255,0.03);color:inherit}
+
+  /* responsive */
+  @media (max-width:1000px){ #mainWrap{grid-template-columns:1fr} .left{display:none} }
+</style>
+
 </head>
 <body>
-  <div id="login">
-    <h2>🔐 Login</h2>
-    <input type="text" id="username" placeholder="Username"><br>
-    <input type="password" id="passcode" placeholder="Passcode"><br>
-    <button id="loginBtn">Login</button>
-  </div>
+  <div id="mainWrap">
+    <!-- LEFT (users & admin controls) -->
+    <div class="left">
+      <div class="brand">
+        <div class="logo">K</div>
+        <div>
+          <div style="font-weight:700">Kiko Chat</div>
+          <div class="smallMuted">Private dashboard</div>
+        </div>
+      </div>
 
-  <div id="chat">
-    <header>
-      <h3 id="welcomeUser"></h3>
-      <button id="themeToggle">🌙/🌞</button>
-    </header>
-    <div id="messages"></div>
-    <textarea id="messageInput" placeholder="Type a message..." rows="2"></textarea>
-    <button id="sendBtn">Send</button>
+      <div id="usersList" aria-live="polite"></div>
 
-    <div id="adminControls">
-      <h3>👑 Admin Panel</h3>
-      <input type="text" id="newUsername" placeholder="New Username">
-      <input type="password" id="newPass" placeholder="New Passcode">
-      <button id="createUserBtn">Create User</button>
-      <button id="clearBtn">Clear Chat</button>
+      <div class="controls">
+        <label class="smallMuted">Wallpaper (upload to repo: content/wallpaper.jpg) — auto-loaded</label>
+        <label class="smallMuted">Admin actions</label>
+
+        <div id="adminPanel">
+          <div style="display:flex;gap:8px">
+            <input id="newUsername" placeholder="username" />
+            <input id="newPass" placeholder="passcode" />
+          </div>
+          <div style="display:flex;gap:8px;margin-top:6px">
+            <button id="createUserBtn">Create User</button>
+            <button id="createAdminBtn">Create Admin</button>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <input id="avatarFile" type="file" accept="image/*" />
+            <button id="setAvatarBtn">Set Avatar (for selected user)</button>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button id="clearBtn">Clear Chat</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT (chat) -->
+    <div class="right">
+      <div class="topbar">
+        <div class="top-left">
+          <div style="font-weight:700" id="meName">Not logged</div>
+          <div style="color:var(--muted);margin-left:8px" id="meRole"></div>
+        </div>
+        <div class="actions">
+          <input id="fileInput" type="file" accept="image/*,video/*" style="display:none" />
+          <button id="attachBtn">📎</button>
+          <button id="themeToggle">🌙/🌞</button>
+          <button id="logoutBtn">Logout</button>
+        </div>
+      </div>
+
+      <!-- CHAT PANEL -->
+      <div class="chatPanel" id="dashboard" style="display:none">
+        <div id="messages" aria-live="polite"></div>
+
+        <div class="composer">
+          <input id="textInput" type="text" placeholder="Type a message or attach an image/video..." />
+          <button id="sendBtn">Send</button>
+        </div>
+      </div>
+
+      <!-- LOGIN -->
+      <div id="loginPane" style="display:grid;place-items:center">
+        <div style="width:420px;background:rgba(0,0,0,0.25);padding:20px;border-radius:12px;text-align:center">
+          <h2 style="margin:0 0 8px">Secure Login</h2>
+          <input id="usernameLogin" placeholder="username" /><br/>
+          <input id="passLogin" placeholder="passcode" type="password" /><br/>
+          <div style="display:flex;gap:8px;justify-content:center;margin-top:8px">
+            <button id="loginBtn">Login</button>
+            <button id="openAdminLogin">Admin Login</button>
+          </div>
+          <div style="color:var(--muted);font-size:13px;margin-top:8px">Admin creates users and sets avatars.</div>
+        </div>
+      </div>
     </div>
   </div>
+
+<!-- ====== UI SCRIPTS (hooks to firebase functions defined above) ====== -->
+<script>
+  // wire up UI -> firebase functions (exposed as window._chat)
+  const usernameInput = document.getElementById('usernameLogin');
+  const passInput = document.getElementById('passLogin');
+  const loginBtn = document.getElementById('loginBtn');
+  const openAdminLogin = document.getElementById('openAdminLogin');
+  const logoutBtn = document.getElementById('logoutBtn');
+  const meName = document.getElementById('meName');
+  const meRole = document.getElementById('meRole');
+  const dashboard = document.getElementById('dashboard');
+  const adminPanel = document.getElementById('adminPanel');
+  const usersList = document.getElementById('usersList');
+  const createUserBtn = document.getElementById('createUserBtn');
+  const createAdminBtn = document.getElementById('createAdminBtn');
+  const newUsername = document.getElementById('newUsername');
+  const newPass = document.getElementById('newPass');
+  const attachBtn = document.getElementById('attachBtn');
+  const fileInput = document.getElementById('fileInput');
+  const sendBtn = document.getElementById('sendBtn');
+  const textInput = document.getElementById('textInput');
+  const clearBtn = document.getElementById('clearBtn');
+  const setAvatarBtn = document.getElementById('setAvatarBtn');
+  const avatarFile = document.getElementById('avatarFile');
+  const themeToggle = document.getElementById('themeToggle');
+  const mainWrap = document.getElementById('mainWrap');
+
+  // helper to refresh users list (calls function loaded in module)
+  async function refreshUsers() {
+    if (window._chat && window._chat.loadUsersList) {
+      await window._chat.loadUsersList();
+      // build visible user list from _userMap
+      usersList.innerHTML = '';
+      const map = window._userMap || {};
+      for (const name of Object.keys(map)) {
+        const item = document.createElement('div'); item.className = 'userItem';
+        const av = document.createElement('div'); av.className = 'miniAvatar';
+        if (map[name].avatar) {
+          av.style.backgroundImage = `url('${map[name].avatar}')`; av.style.backgroundSize = 'cover'; av.textContent = '';
+        } else av.style.background = (window._chat && window._chat.colorFromName) ? window._chat.colorFromName(name) : '';
+        const nm = document.createElement('div'); nm.textContent = name;
+        item.appendChild(av); item.appendChild(nm);
+        usersList.appendChild(item);
+      }
+    }
+  }
+
+  // login flow
+  loginBtn.addEventListener('click', async () => {
+    const u = usernameInput.value.trim(), p = passInput.value.trim();
+    if (!u || !p) return alert('enter username and pass');
+    const ok = await window._chat.login(u,p);
+    if (ok) {
+      meName.textContent = u;
+      meRole.textContent = window._userMap && window._userMap[u] ? window._userMap[u].role : '';
+      document.getElementById('loginPane').style.display = 'none';
+      document.getElementById('dashboard').style.display = 'grid';
+      if (window._userMap && window._userMap[u] && window._userMap[u].role === 'admin') {
+        adminPanel.style.display = 'block';
+        document.getElementById('adminPanel').style.display = 'block';
+      } else { adminPanel.style.display = 'none'; document.getElementById('adminPanel').style.display = 'none'; }
+      refreshUsers(); // show list
+    }
+  });
+
+  openAdminLogin.addEventListener('click', () => {
+    // hint: admin login is same, but admin created user must exist.
+    alert('Admin uses same login form. Log in with your admin username & passcode.');
+  });
+
+  logoutBtn.addEventListener('click', () => {
+    localStorage.removeItem('chat_user'); location.reload();
+  });
+
+  // Create user/admin
+  createUserBtn.addEventListener('click', async () => {
+    if (!confirm('Create new user?')) return;
+    await window._chat.createUser(newUsername.value.trim(), newPass.value.trim());
+    newUsername.value=''; newPass.value='';
+    await refreshUsers();
+  });
+  createAdminBtn.addEventListener('click', async () => {
+    if (!confirm('Create new admin?')) return;
+    await window._chat.createAdmin(newUsername.value.trim(), newPass.value.trim());
+    newUsername.value=''; newPass.value='';
+    await refreshUsers();
+  });
+
+  // Set avatar for selected created username (admin only)
+  setAvatarBtn.addEventListener('click', async () => {
+    const name = prompt('Enter username to set avatar for:');
+    if (!name) return;
+    if (avatarFile.files.length === 0) return alert('Choose an image file first');
+    await window._chat.setUserAvatar(name, avatarFile.files[0]);
+    await refreshUsers();
+  });
+
+  // Attach file (image/video)
+  attachBtn.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', async () => {
+    if (fileInput.files.length === 0) return;
+    await window._chat.uploadAndSendFile(fileInput.files[0]);
+    fileInput.value = '';
+  });
+
+  // Send text
+  sendBtn.addEventListener('click', async () => {
+    const t = textInput.value.trim(); if (!t) return;
+    await window._chat.sendText(t);
+    textInput.value='';
+  });
+
+  // Clear chat
+  clearBtn.addEventListener('click', async () => {
+    await window._chat.clearChat();
+  });
+
+  // theme toggle
+  themeToggle.addEventListener('click', () => {
+    document.documentElement.classList.toggle('light');
+    const isLight = document.documentElement.classList.contains('light');
+    localStorage.setItem('theme', isLight ? 'light' : 'dark');
+  });
+
+  // small periodic refresh of user list (to show avatars etc)
+  setInterval(refreshUsers, 3000);
+  // expose color helper for leftlist builder
+  window._chat = window._chat || {};
+  window._chat.colorFromName = (n)=>{ let h=0; for(let i=0;i<n.length;i++)h=n.charCodeAt(i)+((h<<5)-h); return `hsl(${Math.abs(h%360)},70%,45%)`; };
+</script>
 </body>
 </html>
