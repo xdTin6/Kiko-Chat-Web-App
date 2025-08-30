@@ -2,11 +2,264 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
 <title>KikoChat</title>
 
 <script type="module">
-// ... (your existing JavaScript code remains exactly the same) ...
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-app.js";
+import {
+  getDatabase, ref as dbRef, push, onChildAdded, remove, set, get, child, update, onValue, onDisconnect
+} from "https://www.gstatic.com/firebasejs/10.12.3/firebase-database.js";
+
+// --- CONFIG & INITIALIZATION ---
+const firebaseConfig = {
+  apiKey: "AIzaSyAe_ZfZ8rKCke47UeA9Kcs8cXpD6-G6RAQ",
+  authDomain: "kiko-chat-b6435.firebaseapp.com",
+  databaseURL: "https://kiko-chat-b6435-default-rtdb.firebaseio.com",
+  projectId: "kiko-chat-b6435",
+  storageBucket: "kiko-chat-b6435.appspot.com",
+  messagingSenderId: "896370793240",
+  appId: "1:896370793240:web:3f14442a5d80cd71fb1c6d",
+  measurementId: "G-FB55ZBH15N"
+};
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+
+const USERS_PATH = "users";
+const ROOM_PATH = "rooms/room1/messages";
+const usersRef = dbRef(db, USERS_PATH);
+const roomRef = dbRef(db, ROOM_PATH);
+
+let state = { currentUser: null, userMap: {} };
+
+// --- DOM ELEMENTS ---
+const elements = {}; // Object to hold all DOM element references
+
+// --- HELPERS ---
+function mkKey(name){ return String(name||"").trim().toLowerCase(); }
+function colorFromName(name){ let h=0;for(let i=0;i<name.length;i++)h=name.charCodeAt(i)+((h<<5)-h);return `hsl(${Math.abs(h%360)},70%,45%)`; }
+function fmtTime(ts){ return new Date(ts).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}); }
+function lastSeenText(ts){
+  if(!ts)return "last seen";
+  const d=Math.floor((Date.now()-ts)/1000);
+  if(d<10)return"online";
+  if(d<60)return`${d}s ago`;
+  if(d<3600)return`${Math.floor(d/60)}m ago`;
+  if(d<86400)return`${Math.floor(d/3600)}h ago`;
+  return `${Math.floor(d/86400)}d ago`;
+}
+
+// --- PRESENCE ---
+async function setPresence(username){
+  const statusRef=dbRef(db,`${USERS_PATH}/${username}/status`);
+  await set(statusRef,{online:true,lastSeen:Date.now()});
+  onDisconnect(statusRef).set({online:false,lastSeen:Date.now()});
+}
+
+// --- USERS ---
+async function createUser(username,pass,role="user"){
+  const k=mkKey(username); if(!k)return;
+  await set(child(usersRef,k),{pass:String(pass),role});
+  alert(`User '${k}' created!`);
+  elements.newUsername.value = '';
+  elements.newPass.value = '';
+}
+
+function updateUsersUI(){
+  elements.usersList.innerHTML="";
+  for(const [username,info] of Object.entries(state.userMap)){
+    const row=document.createElement("div");
+    row.className="userItem";
+    // For mobile: clicking a user shows the chat panel
+    row.onclick = () => {
+      document.body.classList.add('show-chat-panel');
+    };
+
+    const av=document.createElement("div"); av.className="miniAvatar"; av.style.background=colorFromName(username); av.textContent=username[0].toUpperCase();
+    const box=document.createElement("div"); box.className="userInfo";
+    const nm=document.createElement("div"); nm.className="userName"; nm.textContent=username;
+    const st=document.createElement("div"); st.className="userStatus"; st.textContent=info.status&&info.status.online?"online":lastSeenText(info.status?.lastSeen);
+    box.append(nm,st); row.append(av,box); elements.usersList.appendChild(row);
+  }
+}
+
+// --- MESSAGES ---
+async function sendTextMessage(txt){
+  if(!state.currentUser || !txt.trim()) return;
+  const msg={type:"text",name:state.currentUser.name,text:txt.trim(),ts:Date.now(),
+    deliveredBy:{[state.currentUser.name]:true},seenBy:{}};
+  await push(roomRef,msg);
+  elements.textInput.value = ''; // Clear input
+  elements.textInput.style.height = 'auto'; // Reset height
+}
+
+async function uploadAndSendFile(file){
+  if(!state.currentUser) return;
+  const isImg=file.type.startsWith("image/"),isVid=file.type.startsWith("video/");
+  if(!isImg&&!isVid)return alert("Only image or video files are supported.");
+
+  const reader=new FileReader();
+  reader.onload=async e=>{
+    const msg={type:isVid?"video":"image",name:state.currentUser.name,
+      data:e.target.result,filename:file.name,ts:Date.now(),
+      deliveredBy:{[state.currentUser.name]:true},seenBy:{}};
+    await push(roomRef,msg);
+  };
+  reader.readAsDataURL(file);
+}
+
+async function markDelivered(k){ if(state.currentUser) await set(dbRef(db,`${ROOM_PATH}/${k}/deliveredBy/${state.currentUser.name}`),true);}
+async function markSeen(k){ if(state.currentUser) await set(dbRef(db,`${ROOM_PATH}/${k}/seenBy/${state.currentUser.name}`),true); }
+
+function renderMessage(key,msg){
+  const isMe = msg.name === state.currentUser?.name;
+  const wrap=document.createElement("div");
+  wrap.className = `msgRow ${isMe ? "me" : "other"}`;
+
+  const bubble=document.createElement("div"); bubble.className="bubble";
+  if(!isMe) {
+    const meta=document.createElement("div"); meta.className="meta name"; meta.textContent=msg.name; meta.style.color = colorFromName(msg.name);
+    bubble.appendChild(meta);
+  }
+
+  if(msg.type==="image"){ const i=document.createElement("img");i.src=msg.data;i.className="chat-media";bubble.appendChild(i);}
+  else if(msg.type==="video"){ const v=document.createElement("video");v.src=msg.data;v.controls=true;v.className="chat-media";bubble.appendChild(v);}
+  else { const t=document.createElement("div");t.className="text";t.textContent=msg.text||"";bubble.appendChild(t);}
+
+  const footer = document.createElement("div"); footer.className="meta footer";
+  const time = document.createElement("span"); time.textContent = fmtTime(msg.ts);
+  footer.appendChild(time);
+
+  if(isMe){
+    const del=Object.keys(msg.deliveredBy||{}).length, seen=Object.keys(msg.seenBy||{}).filter(u=>u!==msg.name).length;
+    const ticks=document.createElement("span");
+    ticks.className="ticks";
+    ticks.innerHTML = seen > 0 ? '&#10003;&#10003;' : '&#10003;'; // Double vs Single tick
+    ticks.style.color=seen>0?"#4fc3f7":"#a0a0a0";
+    footer.appendChild(ticks);
+  }
+
+  bubble.appendChild(footer);
+  wrap.appendChild(bubble);
+  elements.messages.appendChild(wrap);
+  elements.messages.scrollTop = elements.messages.scrollHeight;
+
+  if(!isMe){ markDelivered(key); markSeen(key); }
+}
+
+// --- LISTENERS ---
+function attachListeners(){
+  onChildAdded(roomRef,s=>{renderMessage(s.key,s.val());});
+  onValue(usersRef,s=>{if(s.exists()){state.userMap=s.val();updateUsersUI();}});
+}
+
+// --- LOGIN & SESSION ---
+async function loginFlow(raw,pass){
+  const u=mkKey(raw); if (!u || !pass) return alert("Username and password are required.");
+  const snap=await get(child(usersRef,u));
+  if(!snap.exists())return alert("User not found");
+  const d=snap.val(); if(d.pass!==pass)return alert("Wrong passcode");
+  
+  const user = {name:u,role:d.role};
+  localStorage.setItem("chat_user",JSON.stringify(user));
+  initChatUI(user);
+}
+
+function initChatUI(user) {
+  state.currentUser=user;
+  setPresence(user.name);
+
+  elements.loginView.style.display="none";
+  elements.mainView.style.display="grid";
+  elements.meName.textContent=user.name;
+  elements.meRole.textContent=user.role;
+  if(user.role==="admin") elements.adminPanel.style.display="flex";
+  
+  attachListeners();
+}
+
+// --- GLOBAL INITIALIZATION ---
+function bindEvents() {
+    elements.loginButton.addEventListener('click', () => Kiko.login(elements.usernameLogin.value, elements.passLogin.value));
+    elements.logoutBtn.addEventListener('click', () => { localStorage.clear(); location.reload(); });
+    
+    // Text Input Events
+    elements.sendBtn.addEventListener('click', () => Kiko.sendTextMessage(elements.textInput.value));
+    elements.textInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            Kiko.sendTextMessage(elements.textInput.value);
+        }
+    });
+    // Auto-grow textarea
+    elements.textInput.addEventListener('input', () => {
+        elements.textInput.style.height = 'auto';
+        elements.textInput.style.height = `${elements.textInput.scrollHeight}px`;
+    });
+
+
+    elements.attachBtn.addEventListener('click', () => elements.fileInput.click());
+    elements.fileInput.addEventListener('change', () => { if(elements.fileInput.files[0]) Kiko.uploadAndSendFile(elements.fileInput.files[0])});
+
+    // Admin Panel Events
+    elements.addUserBtn.addEventListener('click', () => Kiko.createUser(elements.newUsername.value, elements.newPass.value));
+    elements.addAdminBtn.addEventListener('click', () => Kiko.createUser(elements.newUsername.value, elements.newPass.value, 'admin'));
+    elements.clearChatBtn.addEventListener('click', () => Kiko.clearChat());
+
+    // Mobile UI event
+    elements.backToUsersBtn.addEventListener('click', () => document.body.classList.remove('show-chat-panel'));
+}
+
+window.addEventListener("load", async ()=>{
+    // Cache all DOM elements
+    elements.loginView = document.getElementById("loginView");
+    elements.mainView = document.getElementById("mainView");
+    elements.usersList = document.getElementById("usersList");
+    elements.messages = document.getElementById("messages");
+    elements.adminPanel = document.getElementById("adminPanel");
+    elements.meName = document.getElementById("meName");
+    elements.meRole = document.getElementById("meRole");
+    elements.usernameLogin = document.getElementById("usernameLogin");
+    elements.passLogin = document.getElementById("passLogin");
+    elements.loginButton = document.getElementById("loginButton");
+    elements.logoutBtn = document.getElementById("logoutBtn");
+    elements.textInput = document.getElementById("textInput");
+    elements.sendBtn = document.getElementById("sendBtn");
+    elements.attachBtn = document.getElementById("attachBtn");
+    elements.fileInput = document.getElementById("fileInput");
+    elements.newUsername = document.getElementById("newUsername");
+    elements.newPass = document.getElementById("newPass");
+    elements.addUserBtn = document.getElementById("addUserBtn");
+    elements.addAdminBtn = document.getElementById("addAdminBtn");
+    elements.clearChatBtn = document.getElementById("clearChatBtn");
+    elements.backToUsersBtn = document.getElementById("backToUsersBtn");
+
+    bindEvents(); // Attach all event listeners
+
+    const stored=localStorage.getItem("chat_user");
+    if(stored){
+        try {
+            const user = JSON.parse(stored);
+            initChatUI(user);
+        } catch(e) {
+            localStorage.clear();
+        }
+    }
+});
+
+// --- EXPORT TO WINDOW ---
+window.Kiko = {
+    login: loginFlow,
+    createUser,
+    sendTextMessage,
+    uploadAndSendFile,
+    clearChat: async () => {
+        if (confirm("Are you sure you want to clear all messages?")) {
+            await remove(roomRef);
+            document.getElementById("messages").innerHTML="";
+        }
+    }
+};
 </script>
 
 <style>
@@ -23,13 +276,19 @@
   --other-bubble-bg: #21262d;
   --online-indicator: #238636;
 }
-* { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+* { 
+  box-sizing: border-box; 
+  margin: 0; 
+  padding: 0; 
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
+}
 html, body { 
   height: 100%; 
+  width: 100%;
   overflow: hidden; 
   background-color: var(--background-dark); 
   color: var(--text-primary); 
-  font-size: 14px; /* Base font size */
+  font-size: 16px;
 }
 
 /* --- Login View --- */
@@ -39,13 +298,13 @@ html, body {
   justify-content: center; 
   width: 100%; 
   height: 100%; 
-  padding: 16px; /* Added padding for mobile */
+  padding: 16px;
 }
 .loginCard { 
   background: var(--panel-bg); 
   padding: 24px; 
   width: 100%; 
-  max-width: 350px; 
+  max-width: 400px;
   border-radius: 12px; 
   text-align: center; 
   border: 1px solid var(--panel-border); 
@@ -80,7 +339,7 @@ html, body {
   background: var(--background-dark); 
   color: var(--text-primary); 
   outline: none; 
-  font-size: 16px; /* Better for mobile */
+  font-size: 16px;
 }
 .loginCard input:focus { 
   border-color: var(--accent-color); 
@@ -96,7 +355,7 @@ html, body {
   font-weight: 600; 
   cursor: pointer; 
   transition: background-color 0.2s; 
-  font-size: 16px; /* Better for mobile */
+  font-size: 16px;
 }
 .loginCard button:hover { 
   background: var(--accent-hover); 
@@ -107,7 +366,7 @@ html, body {
   width: 100%; 
   height: 100%; 
   display: grid; 
-  grid-template-columns: minmax(250px, 340px) 1fr; /* More flexible sizing */
+  grid-template-columns: minmax(250px, 320px) 1fr;
 }
 .leftPanel, .rightPanel { 
   display: flex; 
@@ -119,13 +378,13 @@ html, body {
   border-right: 1px solid var(--panel-border); 
 }
 .panelHeader { 
-  padding: 12px 16px; 
+  padding: 16px; 
   border-bottom: 1px solid var(--panel-border); 
   display: flex; 
   align-items: center; 
   gap: 10px; 
   font-weight: 600; 
-  min-height: 60px; /* Fixed height for consistency */
+  min-height: 64px;
 }
 .panelHeader .logoCat { 
   width: 36px; 
@@ -147,7 +406,7 @@ html, body {
   display: flex; 
   align-items: center; 
   gap: 12px; 
-  padding: 10px; 
+  padding: 12px; 
   border-radius: 8px; 
   cursor: pointer; 
   transition: background-color 0.2s; 
@@ -168,7 +427,8 @@ html, body {
 }
 .userInfo { 
   flex: 1; 
-  min-width: 0; /* Prevents overflow */
+  min-width: 0;
+  overflow: hidden;
 }
 .userName { 
   font-weight: 500; 
@@ -187,6 +447,7 @@ html, body {
 
 /* Admin Panel */
 #adminPanel { 
+  display: flex;
   flex-wrap: wrap; 
   gap: 8px; 
   padding: 12px; 
@@ -222,7 +483,7 @@ html, body {
 /* Right Panel (Chat Area) */
 .topbar { 
   padding: 0 16px; 
-  height: 60px; 
+  height: 64px; 
   display: flex; 
   justify-content: space-between; 
   align-items: center; 
@@ -268,7 +529,7 @@ html, body {
 }
 .msgRow { 
   display: flex; 
-  max-width: 80%; /* Slightly increased for better readability */
+  max-width: 80%;
   margin-bottom: 8px; 
 }
 .msgRow.me { 
@@ -346,7 +607,7 @@ html, body {
   resize: none;
   overflow-y: auto;
   max-height: 120px;
-  min-height: 44px; /* Better touch target on mobile */
+  min-height: 44px;
 }
 .composer textarea::-webkit-scrollbar { 
   width: 5px; 
@@ -373,13 +634,13 @@ html, body {
 /* --- Mobile Responsive Design --- */
 @media (max-width: 1024px) {
   #mainView { 
-    grid-template-columns: minmax(200px, 280px) 1fr; 
+    grid-template-columns: minmax(220px, 280px) 1fr; 
   }
 }
 
 @media (max-width: 768px) {
   html, body {
-    font-size: 15px; /* Slightly larger base font for mobile */
+    font-size: 15px;
   }
   
   #mainView { 
@@ -408,15 +669,20 @@ html, body {
   }
   .topbar { 
     padding: 0 12px; 
+    height: 60px;
   }
   #backToUsersBtn { 
     display: block; 
   }
   .msgRow {
-    max-width: 90%; /* More width on mobile */
+    max-width: 90%;
   }
   .composer {
     padding: 10px 12px;
+  }
+  .panelHeader {
+    padding: 12px;
+    min-height: 60px;
   }
 }
 
@@ -430,7 +696,7 @@ html, body {
   }
   
   .userItem {
-    padding: 8px;
+    padding: 10px;
   }
   
   #messages {
@@ -443,6 +709,7 @@ html, body {
   
   .composer {
     gap: 8px;
+    padding: 10px;
   }
   
   .composer button {
@@ -489,7 +756,6 @@ html, body {
 </head>
 <body>
 
-<!-- Your existing HTML remains exactly the same -->
 <div id="loginView">
   <div class="loginCard">
     <div class="logoWrap"><div class="logoCat">🐱</div><div class="logoText">KikoChat</div></div>
