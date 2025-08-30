@@ -156,12 +156,3 @@ service firebase.storage {
 Made with ❤️ by **Xdtin6**
 
 ```
-
----
-
-✅ Fixed spacing + formatting  
-✅ Fixed headings  
-✅ Polished setup instructions  
-
-Do you also want me to **rewrite the Firebase rules** so they actually check the `/users` list and only allow known usernames to send/read messages (instead of open read/write)?
-```
