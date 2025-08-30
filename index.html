@@ -1,83 +1,13 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <title>Notes</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <style>
-    :root{--bg:#0b0c0d;--panel:#0f172a;--text:#e5e7eb;--muted:#9ca3af;--line:#1f2937;--accent:#2563eb}
-    *{box-sizing:border-box}
-    body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
-    .wrap{max-width:820px;margin:0 auto;padding:16px;display:grid;gap:12px}
-    header{display:flex;align-items:center;justify-content:space-between;padding-top:4px}
-    header h1{font-size:18px;margin:0;color:#f3f4f6}
-    .panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:12px}
-    #messages{height:62vh;overflow-y:auto;display:flex;flex-direction:column;gap:10px;padding:4px}
-    .item{max-width:80%}
-    .me{align-self:flex-end}
-    .bubble{padding:10px 12px;border-radius:12px;white-space:pre-wrap;word-wrap:break-word;line-height:1.35}
-    .me .bubble{background:#1f2937}
-    .other .bubble{background:#0b1220}
-    .meta{font-size:11px;color:var(--muted);margin-bottom:4px}
-    form.send{display:grid;grid-template-columns:1fr auto;gap:8px}
-    textarea{width:100%;min-height:56px;resize:none;border-radius:12px;padding:10px 12px;border:1px solid var(--line);background:#0b1220;color:var(--text)}
-    button{padding:10px 16px;border-radius:12px;border:0;background:var(--accent);color:#fff;font-weight:600;cursor:pointer}
-    input[type=text],input[type=password]{width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:#0b1220;color:var(--text)}
-    .row{display:flex;gap:8px;align-items:center}
-    #lock{min-height:100vh;display:grid;place-items:center}
-    .card{width:100%;max-width:380px}
-    .muted{font-size:12px;color:var(--muted);margin-top:8px}
-    .tiny{font-size:10px;color:var(--muted)}
-    .hidden{display:none !important}
-  </style>
-</head>
-<body>
-  <!-- Lock screen -->
-  <section id="lock">
-    <div class="panel card">
-      <h2 style="margin:0 0 8px">Sign in</h2>
-      <div class="muted">Enter the shared PIN</div>
-      <div class="row" style="margin-top:10px">
-        <input id="pin" type="password" placeholder="PIN" autofocus />
-        <button id="enterBtn">Enter</button>
-      </div>
-      <div class="muted" style="margin-top:10px">Tip: page title is boring on purpose.</div>
-    </div>
-  </section>
-
-  <!-- Chat -->
-  <section id="app" class="hidden">
-    <div class="wrap">
-      <header>
-        <h1>Private Notes</h1>
-        <div class="row">
-          <input id="name" type="text" placeholder="Your name" style="width:160px">
-          <button id="signOut">Lock</button>
-        </div>
-      </header>
-
-      <div id="messages" class="panel" aria-live="polite"></div>
-
-      <form id="sendForm" class="panel send">
-        <textarea id="text" placeholder="Type a message…" required></textarea>
-        <button type="submit">Send</button>
-      </form>
-
-      <div class="tiny">Messages are stored in Firebase Realtime Database.</div>
-    </div>
-  </section>
-
-  <!-- Firebase (ES modules from CDN) -->
+  <meta charset="UTF-8">
+  <title>Kiko Chat</title>
   <script type="module">
-    /* ======== 1) CONFIGURE YOUR PIN ======== */
-    const PIN = "8190"; // ✅ fixed here
-
-    /* ======== 2) Firebase config ======== */
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-app.js";
-    import {
-      getDatabase, ref, push, onChildAdded, query, limitToLast
-    } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-database.js";
+    import { getDatabase, ref, push, onChildAdded, remove, set, get, child } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-database.js";
 
+    // 🔥 Your Firebase Config
     const firebaseConfig = {
       apiKey: "AIzaSyAe_ZfZ8rKCke47UeA9Kcs8cXpD6-G6RAQ",
       authDomain: "kiko-chat-b6435.firebaseapp.com",
@@ -89,105 +19,139 @@
       measurementId: "G-FB55ZBH15N"
     };
 
+    // Init Firebase
     const app = initializeApp(firebaseConfig);
-    const db  = getDatabase(app);
+    const db = getDatabase(app);
 
-    /* ======== 3) Elements ======== */
-    const $lock = document.getElementById("lock");
-    const $app  = document.getElementById("app");
-    const $pin  = document.getElementById("pin");
-    const $enter= document.getElementById("enterBtn");
-    const $name = document.getElementById("name");
-    const $messages = document.getElementById("messages");
-    const $form = document.getElementById("sendForm");
-    const $text = document.getElementById("text");
-    const $signOut = document.getElementById("signOut");
-
-    /* ======== 4) Lock screen logic ======== */
-    function unlockIfRemembered() {
-      if (localStorage.getItem("chat_pin_ok") === "1") showApp();
-    }
-    function showApp() {
-      $lock.classList.add("hidden");
-      $app.classList.remove("hidden");
-      $name.value = localStorage.getItem("chat_name") || "";
-      $text.focus();
-    }
-    $enter.addEventListener("click", () => {
-      if ($pin.value.trim() === PIN) {
-        localStorage.setItem("chat_pin_ok","1");
-        showApp();
-      } else {
-        alert("Wrong PIN");
-      }
-    });
-    $pin.addEventListener("keydown", e => {
-      if (e.key === "Enter") $enter.click();
-    });
-    $signOut.addEventListener("click", () => {
-      localStorage.removeItem("chat_pin_ok");
-      location.reload();
-    });
-    unlockIfRemembered();
-
-    /* ======== 5) Chat logic ======== */
+    // References
+    const usersRef = ref(db, "users");
     const roomRef = ref(db, "rooms/room1/messages");
 
-    function fmt(ts){
-      return new Intl.DateTimeFormat(undefined, {
-        year:"2-digit", month:"2-digit", day:"2-digit",
-        hour:"2-digit", minute:"2-digit"
-      }).format(new Date(ts));
-    }
+    let currentUser = null;
 
-    function renderMessage(msg, myName) {
-      const item = document.createElement("div");
-      const who = (msg.name || "anon").trim();
-      const mine = myName && who === myName.trim();
-
-      item.className = `item ${mine ? "me" : "other"}`;
-      const meta = document.createElement("div");
-      meta.className = "meta";
-      meta.textContent = `${fmt(msg.ts || Date.now())} · ${who}`;
-
-      const bubble = document.createElement("div");
-      bubble.className = "bubble";
-      bubble.textContent = msg.text || "";
-
-      item.appendChild(meta);
-      item.appendChild(bubble);
-      $messages.appendChild(item);
-      $messages.scrollTop = $messages.scrollHeight;
-    }
-
-    // Live stream last 200 messages
-    onChildAdded(query(roomRef, limitToLast(200)), snap => {
-      renderMessage(snap.val() || {}, $name.value);
-    });
-
-    // Save name locally
-    $name.addEventListener("change", () => {
-      localStorage.setItem("chat_name", $name.value.trim());
-    });
-
-    // Send on submit
-    $form.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const name = ($name.value || "").trim().slice(0,32);
-      const text = ($text.value || "").trim();
-      if (!name || !text) return;
-
-      await push(roomRef, { name, text, ts: Date.now() });
-      $text.value = "";
-      $text.focus();
-    });
-
-    // Send on Ctrl+Enter
-    $text.addEventListener("keydown", (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-        $form.requestSubmit();
+    // Login Function
+    async function login(username, pass) {
+      const snap = await get(child(usersRef, username));
+      if (!snap.exists()) {
+        alert("User not found!");
+        return false;
       }
+      const data = snap.val();
+      if (data.pass !== pass) {
+        alert("Wrong passcode!");
+        return false;
+      }
+      currentUser = { name: username, role: data.role };
+      localStorage.setItem("chat_user", JSON.stringify(currentUser));
+      enterChat();
+      return true;
+    }
+
+    // Admin create user
+    async function createUser(username, pass, role="user") {
+      await set(child(usersRef, username), { pass, role });
+      alert(`✅ User "${username}" created!`);
+    }
+
+    // Enter chat after login
+    function enterChat() {
+      document.getElementById("login").style.display = "none";
+      document.getElementById("chat").style.display = "block";
+      document.getElementById("welcomeUser").innerText = `Welcome, ${currentUser.name}`;
+      loadMessages();
+      if (currentUser.role === "admin") {
+        document.getElementById("adminControls").style.display = "block";
+      }
+    }
+
+    // Send Message
+    document.addEventListener("DOMContentLoaded", () => {
+      document.getElementById("sendBtn").addEventListener("click", () => {
+        const msg = document.getElementById("messageInput").value;
+        if (msg.trim() === "") return;
+        push(roomRef, { name: currentUser.name, text: msg });
+        document.getElementById("messageInput").value = "";
+      });
+
+      document.getElementById("loginBtn").addEventListener("click", () => {
+        const username = document.getElementById("username").value;
+        const pass = document.getElementById("passcode").value;
+        login(username, pass);
+      });
+
+      document.getElementById("createUserBtn").addEventListener("click", () => {
+        if (currentUser.role !== "admin") {
+          alert("❌ Only admin can create users");
+          return;
+        }
+        const newUser = document.getElementById("newUsername").value;
+        const newPass = document.getElementById("newPass").value;
+        createUser(newUser, newPass, "user");
+      });
+
+      document.getElementById("clearBtn").addEventListener("click", async () => {
+        if (currentUser.role !== "admin") {
+          alert("❌ Only admin can clear chat");
+          return;
+        }
+        if (confirm("Clear all messages?")) {
+          await remove(roomRef);
+          document.getElementById("messages").innerHTML = "";
+        }
+      });
     });
+
+    // Load Messages
+    function loadMessages() {
+      onChildAdded(roomRef, (snapshot) => {
+        const msg = snapshot.val();
+        const p = document.createElement("p");
+        p.textContent = `${msg.name}: ${msg.text}`;
+        document.getElementById("messages").appendChild(p);
+      });
+    }
+
+    // Auto-login if already stored
+    window.onload = () => {
+      const stored = localStorage.getItem("chat_user");
+      if (stored) {
+        currentUser = JSON.parse(stored);
+        enterChat();
+      }
+    }
   </script>
+  <style>
+    body { font-family: Arial, sans-serif; background: #f0f2f5; margin:0; padding:0; }
+    #login, #chat { padding: 20px; }
+    #chat { display: none; }
+    #messages { border:1px solid #ccc; height:300px; overflow-y:scroll; padding:10px; background:#fff; }
+    input { padding: 8px; margin: 5px; }
+    button { padding: 8px 12px; margin: 5px; }
+    #adminControls { display: none; margin-top: 20px; padding: 10px; border:1px solid #aaa; background: #fafafa; }
+  </style>
+</head>
+<body>
+  <div id="login">
+    <h2>🔐 Login</h2>
+    <input type="text" id="username" placeholder="Username"><br>
+    <input type="password" id="passcode" placeholder="Passcode"><br>
+    <button id="loginBtn">Login</button>
+  </div>
+
+  <div id="chat">
+    <h2 id="welcomeUser"></h2>
+    <div id="messages"></div>
+    <input type="text" id="messageInput" placeholder="Type message...">
+    <button id="sendBtn">Send</button>
+
+    <div id="adminControls">
+      <h3>👑 Admin Controls</h3>
+      <input type="text" id="newUsername" placeholder="New Username">
+      <input type="password" id="newPass" placeholder="New Passcode">
+      <button id="createUserBtn">Create User</button>
+      <br>
+      <button id="clearBtn">Clear Chat</button>
+    </div>
+  </div>
 </body>
 </html>
