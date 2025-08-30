@@ -1,6 +1,17 @@
+Perfect 🙌 I see the issues:
+
+* Heading formatting (`###2.` should be `### 2.`)
+* Inconsistent spacing in code blocks
+* Small cleanup for better readability
+
+Here’s your **fixed & polished README.md**:
+
+---
+
+````markdown
 # 🐱 KikoChat
 
-KikoChat is a **modern real-time chat web app** built with **Firebase Realtime Database** and deployed on **GitHub Pages**.  
+KikoChat is a **modern real-time chat web app** built with **Firebase Realtime Database & Storage** and deployed on **GitHub Pages**.  
 It’s designed with a **WhatsApp-like experience** plus extra admin features — all wrapped in a **beautiful glassmorphism UI** with animated backgrounds.  
 
 ---
@@ -40,27 +51,30 @@ It’s designed with a **WhatsApp-like experience** plus extra admin features �
 ![Login Page](screenshots/LoginPage.png)
 
 ### 💬 Admin Chat Page
-![Chat Page](screenshots/AdminChatPage.png)
+![Admin Chat Page](screenshots/AdminChatPage.png)
+
 ### 💬 User Chat Page
-![Chat Page](screenshots/UserChatPage.png)
+![User Chat Page](screenshots/UserChatPage.png)
 
 ---
 
 ## 🚀 Tech Stack
 
 - **Frontend**: HTML, CSS (Glassmorphism, responsive), Vanilla JS  
-- **Backend**: Firebase Realtime Database (authentication + chat storage)  
+- **Backend**: Firebase Realtime Database + Firebase Storage  
 - **Hosting**: GitHub Pages  
 
 ---
 
 ## 🛠️ Setup
 
-### 1. Clone this repo:  
-   ```bash
-   git clone https://github.com/your-username/kikochat.git```
+### 1. Clone this repo
+```bash
+git clone https://github.com/your-username/kikochat.git
+cd kikochat
+````
 
-###2. Setup Firebase
+### 2. Setup Firebase
 
 1. Go to [Firebase Console](https://console.firebase.google.com/)
 2. Click **Add Project** → give it a name (e.g., `kiko-chat`)
@@ -72,7 +86,7 @@ It’s designed with a **WhatsApp-like experience** plus extra admin features �
 
    * Go to **Build → Storage** → Create a default bucket
    * Allow read/write for testing (or configure secure rules).
-5. Add a **Web App** to your project:
+5. Add a **Web App** to your project
 
    * Go to **Project Settings → Your Apps → Web App**
    * Copy the **Firebase Config** (API Key, Auth Domain, Database URL, Storage Bucket, etc.).
@@ -80,7 +94,7 @@ It’s designed with a **WhatsApp-like experience** plus extra admin features �
 
 ### 3. Run Locally
 
-Open `index.html` in your browser (no server needed since Firebase SDK works client-side).
+Simply open `index.html` in your browser (no server needed since Firebase SDK works client-side).
 
 ### 4. Deploy to GitHub Pages
 
@@ -103,7 +117,7 @@ Open `index.html` in your browser (no server needed since Firebase SDK works cli
 
 ## 🔒 Firebase Security Rules (Recommended)
 
-For **production**, you should restrict access so only authenticated users (those created by you via username + passcode) can read/write data.
+For **production**, restrict access so only authenticated users (those created by you via username + passcode) can read/write data.
 
 ### Realtime Database Rules
 
@@ -130,7 +144,7 @@ For **production**, you should restrict access so only authenticated users (thos
 }
 ```
 
-> ⚠️ For testing, these rules allow open read/write. You should later **restrict to authenticated users** (Firebase Auth or your own custom logic).
+⚠️ These rules are **open for testing**. For production, lock them down (e.g., only allow `.write` if `auth != null` or implement stricter conditions).
 
 ### Storage Rules
 
@@ -149,4 +163,15 @@ service firebase.storage {
 
 ## 👨‍💻 Author
 
-Made with ❤️ by **\[Xdtin6]**
+Made with ❤️ by **Xdtin6**
+
+```
+
+---
+
+✅ Fixed spacing + formatting  
+✅ Fixed headings  
+✅ Polished setup instructions  
+
+Do you also want me to **rewrite the Firebase rules** so they actually check the `/users` list and only allow known usernames to send/read messages (instead of open read/write)?
+```
