@@ -58,9 +58,9 @@ It’s designed with a **WhatsApp-like experience** plus extra admin features �
 
 ### 1. Clone this repo:  
    ```bash
-   git clone https://github.com/your-username/kikochat.git
+   git clone https://github.com/your-username/kikochat.git```
 
-### 2. Setup Firebase
+###2. Setup Firebase
 
 1. Go to [Firebase Console](https://console.firebase.google.com/)
 2. Click **Add Project** → give it a name (e.g., `kiko-chat`)
