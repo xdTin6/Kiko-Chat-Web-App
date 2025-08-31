@@ -996,6 +996,15 @@ function logout() {
 async function initChatUI(user) {
   state.currentUser = user;
   await setPresence(user.name);
+  // Watch for account deletion in real-time
+  onValue(child(usersRef, user.name), (snapshot) => {
+    if (!snapshot.exists()) {
+      sessionStorage.clear();
+      alert("Your account has been removed by the admin.");
+      location.reload();
+    }
+  });
+
 
   elements.loginView.style.display = "none";
   elements.mainView.style.display = "grid";
@@ -1015,7 +1024,7 @@ async function initChatUI(user) {
 }
 
 // Initialize app
-window.addEventListener("load", () => {
+window.addEventListener("load", async () => {
   // Cache DOM elements
   elements.loginView = document.getElementById("loginView");
   elements.mainView = document.getElementById("mainView");
@@ -1060,7 +1069,14 @@ window.addEventListener("load", () => {
   if (storedUser) {
     try {
       const user = JSON.parse(storedUser);
-      initChatUI(user);
+      const snapshot = await get(child(usersRef, user.name));
+      if (!snapshot.exists()) {
+        sessionStorage.clear();
+        showNotification("Your account was removed. Please contact admin.", "error");
+        location.reload();
+      } else {
+        initChatUI(user);
+      }
     } catch (error) {
       sessionStorage.clear();
     }
