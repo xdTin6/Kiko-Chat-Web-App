@@ -1,804 +1,310 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
-<title>KikoChat</title>
-
-<script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-app.js";
-import {
-  getDatabase, ref as dbRef, push, onChildAdded, remove, set, get, child, update, onValue, onDisconnect
-} from "https://www.gstatic.com/firebasejs/10.12.3/firebase-database.js";
-
-// --- CONFIG & INITIALIZATION ---
-const firebaseConfig = {
-  apiKey: "AIzaSyAe_ZfZ8rKCke47UeA9Kcs8cXpD6-G6RAQ",
-  authDomain: "kiko-chat-b6435.firebaseapp.com",
-  databaseURL: "https://kiko-chat-b6435-default-rtdb.firebaseio.com",
-  projectId: "kiko-chat-b6435",
-  storageBucket: "kiko-chat-b6435.appspot.com",
-  messagingSenderId: "896370793240",
-  appId: "1:896370793240:web:3f14442a5d80cd71fb1c6d",
-  measurementId: "G-FB55ZBH15N"
-};
-const app = initializeApp(firebaseConfig);
-const db = getDatabase(app);
-
-const USERS_PATH = "users";
-const ROOM_PATH = "rooms/room1/messages";
-const usersRef = dbRef(db, USERS_PATH);
-const roomRef = dbRef(db, ROOM_PATH);
-
-let state = { currentUser: null, userMap: {} };
-
-// --- DOM ELEMENTS ---
-const elements = {}; // Object to hold all DOM element references
-
-// --- HELPERS ---
-function mkKey(name){ return String(name||"").trim().toLowerCase(); }
-function colorFromName(name){ let h=0;for(let i=0;i<name.length;i++)h=name.charCodeAt(i)+((h<<5)-h);return `hsl(${Math.abs(h%360)},70%,45%)`; }
-function fmtTime(ts){ return new Date(ts).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}); }
-function lastSeenText(ts){
-  if(!ts)return "last seen";
-  const d=Math.floor((Date.now()-ts)/1000);
-  if(d<10)return"online";
-  if(d<60)return`${d}s ago`;
-  if(d<3600)return`${Math.floor(d/60)}m ago`;
-  if(d<86400)return`${Math.floor(d/3600)}h ago`;
-  return `${Math.floor(d/86400)}d ago`;
-}
-
-// --- PRESENCE ---
-async function setPresence(username){
-  const statusRef=dbRef(db,`${USERS_PATH}/${username}/status`);
-  await set(statusRef,{online:true,lastSeen:Date.now()});
-  onDisconnect(statusRef).set({online:false,lastSeen:Date.now()});
-}
-
-// --- USERS ---
-async function createUser(username,pass,role="user"){
-  const k=mkKey(username); if(!k)return;
-  await set(child(usersRef,k),{pass:String(pass),role});
-  alert(`User '${k}' created!`);
-  elements.newUsername.value = '';
-  elements.newPass.value = '';
-}
-
-function updateUsersUI(){
-  elements.usersList.innerHTML="";
-  for(const [username,info] of Object.entries(state.userMap)){
-    const row=document.createElement("div");
-    row.className="userItem";
-    // For mobile: clicking a user shows the chat panel
-    row.onclick = () => {
-      document.body.classList.add('show-chat-panel');
-    };
-
-    const av=document.createElement("div"); av.className="miniAvatar"; av.style.background=colorFromName(username); av.textContent=username[0].toUpperCase();
-    const box=document.createElement("div"); box.className="userInfo";
-    const nm=document.createElement("div"); nm.className="userName"; nm.textContent=username;
-    const st=document.createElement("div"); st.className="userStatus"; st.textContent=info.status&&info.status.online?"online":lastSeenText(info.status?.lastSeen);
-    box.append(nm,st); row.append(av,box); elements.usersList.appendChild(row);
-  }
-}
-
-// --- MESSAGES ---
-async function sendTextMessage(txt){
-  if(!state.currentUser || !txt.trim()) return;
-  const msg={type:"text",name:state.currentUser.name,text:txt.trim(),ts:Date.now(),
-    deliveredBy:{[state.currentUser.name]:true},seenBy:{}};
-  await push(roomRef,msg);
-  elements.textInput.value = ''; // Clear input
-  elements.textInput.style.height = 'auto'; // Reset height
-}
-
-async function uploadAndSendFile(file){
-  if(!state.currentUser) return;
-  const isImg=file.type.startsWith("image/"),isVid=file.type.startsWith("video/");
-  if(!isImg&&!isVid)return alert("Only image or video files are supported.");
-
-  const reader=new FileReader();
-  reader.onload=async e=>{
-    const msg={type:isVid?"video":"image",name:state.currentUser.name,
-      data:e.target.result,filename:file.name,ts:Date.now(),
-      deliveredBy:{[state.currentUser.name]:true},seenBy:{}};
-    await push(roomRef,msg);
-  };
-  reader.readAsDataURL(file);
-}
-
-async function markDelivered(k){ if(state.currentUser) await set(dbRef(db,`${ROOM_PATH}/${k}/deliveredBy/${state.currentUser.name}`),true);}
-async function markSeen(k){ if(state.currentUser) await set(dbRef(db,`${ROOM_PATH}/${k}/seenBy/${state.currentUser.name}`),true); }
-
-function renderMessage(key,msg){
-  const isMe = msg.name === state.currentUser?.name;
-  const wrap=document.createElement("div");
-  wrap.className = `msgRow ${isMe ? "me" : "other"}`;
-
-  const bubble=document.createElement("div"); bubble.className="bubble";
-  if(!isMe) {
-    const meta=document.createElement("div"); meta.className="meta name"; meta.textContent=msg.name; meta.style.color = colorFromName(msg.name);
-    bubble.appendChild(meta);
-  }
-
-  if(msg.type==="image"){ const i=document.createElement("img");i.src=msg.data;i.className="chat-media";bubble.appendChild(i);}
-  else if(msg.type==="video"){ const v=document.createElement("video");v.src=msg.data;v.controls=true;v.className="chat-media";bubble.appendChild(v);}
-  else { const t=document.createElement("div");t.className="text";t.textContent=msg.text||"";bubble.appendChild(t);}
-
-  const footer = document.createElement("div"); footer.className="meta footer";
-  const time = document.createElement("span"); time.textContent = fmtTime(msg.ts);
-  footer.appendChild(time);
-
-  if(isMe){
-    const del=Object.keys(msg.deliveredBy||{}).length, seen=Object.keys(msg.seenBy||{}).filter(u=>u!==msg.name).length;
-    const ticks=document.createElement("span");
-    ticks.className="ticks";
-    ticks.innerHTML = seen > 0 ? '&#10003;&#10003;' : '&#10003;'; // Double vs Single tick
-    ticks.style.color=seen>0?"#4fc3f7":"#a0a0a0";
-    footer.appendChild(ticks);
-  }
-
-  bubble.appendChild(footer);
-  wrap.appendChild(bubble);
-  elements.messages.appendChild(wrap);
-  elements.messages.scrollTop = elements.messages.scrollHeight;
-
-  if(!isMe){ markDelivered(key); markSeen(key); }
-}
-
-// --- LISTENERS ---
-function attachListeners(){
-  onChildAdded(roomRef,s=>{renderMessage(s.key,s.val());});
-  onValue(usersRef,s=>{if(s.exists()){state.userMap=s.val();updateUsersUI();}});
-}
-
-// --- LOGIN & SESSION ---
-async function loginFlow(raw,pass){
-  const u=mkKey(raw); if (!u || !pass) return alert("Username and password are required.");
-  const snap=await get(child(usersRef,u));
-  if(!snap.exists())return alert("User not found");
-  const d=snap.val(); if(d.pass!==pass)return alert("Wrong passcode");
-  
-  const user = {name:u,role:d.role};
-  localStorage.setItem("chat_user",JSON.stringify(user));
-  initChatUI(user);
-}
-
-function initChatUI(user) {
-  state.currentUser=user;
-  setPresence(user.name);
-
-  elements.loginView.style.display="none";
-  elements.mainView.style.display="grid";
-  elements.meName.textContent=user.name;
-  elements.meRole.textContent=user.role;
-  if(user.role==="admin") elements.adminPanel.style.display="flex";
-  
-  attachListeners();
-}
-
-// --- GLOBAL INITIALIZATION ---
-function bindEvents() {
-    elements.loginButton.addEventListener('click', () => Kiko.login(elements.usernameLogin.value, elements.passLogin.value));
-    elements.logoutBtn.addEventListener('click', () => { localStorage.clear(); location.reload(); });
-    
-    // Text Input Events
-    elements.sendBtn.addEventListener('click', () => Kiko.sendTextMessage(elements.textInput.value));
-    elements.textInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            Kiko.sendTextMessage(elements.textInput.value);
-        }
-    });
-    // Auto-grow textarea
-    elements.textInput.addEventListener('input', () => {
-        elements.textInput.style.height = 'auto';
-        elements.textInput.style.height = `${elements.textInput.scrollHeight}px`;
-    });
-
-
-    elements.attachBtn.addEventListener('click', () => elements.fileInput.click());
-    elements.fileInput.addEventListener('change', () => { if(elements.fileInput.files[0]) Kiko.uploadAndSendFile(elements.fileInput.files[0])});
-
-    // Admin Panel Events
-    elements.addUserBtn.addEventListener('click', () => Kiko.createUser(elements.newUsername.value, elements.newPass.value));
-    elements.addAdminBtn.addEventListener('click', () => Kiko.createUser(elements.newUsername.value, elements.newPass.value, 'admin'));
-    elements.clearChatBtn.addEventListener('click', () => Kiko.clearChat());
-
-    // Mobile UI event
-    elements.backToUsersBtn.addEventListener('click', () => document.body.classList.remove('show-chat-panel'));
-}
-
-window.addEventListener("load", async ()=>{
-    // Cache all DOM elements
-    elements.loginView = document.getElementById("loginView");
-    elements.mainView = document.getElementById("mainView");
-    elements.usersList = document.getElementById("usersList");
-    elements.messages = document.getElementById("messages");
-    elements.adminPanel = document.getElementById("adminPanel");
-    elements.meName = document.getElementById("meName");
-    elements.meRole = document.getElementById("meRole");
-    elements.usernameLogin = document.getElementById("usernameLogin");
-    elements.passLogin = document.getElementById("passLogin");
-    elements.loginButton = document.getElementById("loginButton");
-    elements.logoutBtn = document.getElementById("logoutBtn");
-    elements.textInput = document.getElementById("textInput");
-    elements.sendBtn = document.getElementById("sendBtn");
-    elements.attachBtn = document.getElementById("attachBtn");
-    elements.fileInput = document.getElementById("fileInput");
-    elements.newUsername = document.getElementById("newUsername");
-    elements.newPass = document.getElementById("newPass");
-    elements.addUserBtn = document.getElementById("addUserBtn");
-    elements.addAdminBtn = document.getElementById("addAdminBtn");
-    elements.clearChatBtn = document.getElementById("clearChatBtn");
-    elements.backToUsersBtn = document.getElementById("backToUsersBtn");
-
-    bindEvents(); // Attach all event listeners
-
-    const stored=localStorage.getItem("chat_user");
-    if(stored){
-        try {
-            const user = JSON.parse(stored);
-            initChatUI(user);
-        } catch(e) {
-            localStorage.clear();
-        }
-    }
-});
-
-// --- EXPORT TO WINDOW ---
-window.Kiko = {
-    login: loginFlow,
-    createUser,
-    sendTextMessage,
-    uploadAndSendFile,
-    clearChat: async () => {
-        if (confirm("Are you sure you want to clear all messages?")) {
-            await remove(roomRef);
-            document.getElementById("messages").innerHTML="";
-        }
-    }
-};
-</script>
-
-<style>
-/* --- Global Styles & Variables --- */
-:root {
-  --background-dark: #0d1117;
-  --panel-bg: #161b22;
-  --panel-border: #30363d;
-  --text-primary: #e6edf3;
-  --text-secondary: #7d8590;
-  --accent-color: #2f81f7;
-  --accent-hover: #58a6ff;
-  --my-bubble-bg: #224368;
-  --other-bubble-bg: #21262d;
-  --online-indicator: #238636;
-}
-* { 
-  box-sizing: border-box; 
-  margin: 0; 
-  padding: 0; 
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
-}
-html, body { 
-  height: 100%; 
-  width: 100%;
-  overflow: hidden; 
-  background-color: var(--background-dark); 
-  color: var(--text-primary); 
-  font-size: 16px;
-}
-
-/* --- Login View --- */
-#loginView { 
-  display: flex; 
-  align-items: center; 
-  justify-content: center; 
-  width: 100%; 
-  height: 100%; 
-  padding: 16px;
-}
-.loginCard { 
-  background: var(--panel-bg); 
-  padding: 24px; 
-  width: 100%; 
-  max-width: 400px;
-  border-radius: 12px; 
-  text-align: center; 
-  border: 1px solid var(--panel-border); 
-}
-.logoWrap { 
-  display: flex; 
-  align-items: center; 
-  gap: 10px; 
-  justify-content: center; 
-  margin-bottom: 20px; 
-}
-.logoCat { 
-  width: 44px; 
-  height: 44px; 
-  border-radius: 12px; 
-  background: var(--accent-color); 
-  display: flex; 
-  align-items: center; 
-  justify-content: center; 
-  font-size: 24px; 
-}
-.logoText { 
-  font-size: 22px; 
-  font-weight: 600; 
-}
-.loginCard input { 
-  width: 100%; 
-  padding: 12px; 
-  margin: 8px 0; 
-  border: 1px solid var(--panel-border); 
-  border-radius: 8px; 
-  background: var(--background-dark); 
-  color: var(--text-primary); 
-  outline: none; 
-  font-size: 16px;
-}
-.loginCard input:focus { 
-  border-color: var(--accent-color); 
-}
-.loginCard button { 
-  margin-top: 10px; 
-  width: 100%; 
-  padding: 12px; 
-  border: none; 
-  border-radius: 8px; 
-  background: var(--accent-color); 
-  color: #fff; 
-  font-weight: 600; 
-  cursor: pointer; 
-  transition: background-color 0.2s; 
-  font-size: 16px;
-}
-.loginCard button:hover { 
-  background: var(--accent-hover); 
-}
-
-/* --- Main Chat View (Desktop) --- */
-#mainView { 
-  width: 100%; 
-  height: 100%; 
-  display: grid; 
-  grid-template-columns: minmax(250px, 320px) 1fr;
-}
-.leftPanel, .rightPanel { 
-  display: flex; 
-  flex-direction: column; 
-  background: var(--panel-bg); 
-  height: 100%; 
-}
-.leftPanel { 
-  border-right: 1px solid var(--panel-border); 
-}
-.panelHeader { 
-  padding: 16px; 
-  border-bottom: 1px solid var(--panel-border); 
-  display: flex; 
-  align-items: center; 
-  gap: 10px; 
-  font-weight: 600; 
-  min-height: 64px;
-}
-.panelHeader .logoCat { 
-  width: 36px; 
-  height: 36px; 
-  font-size: 20px; 
-  border-radius: 10px; 
-}
-.panelHeader .logoText { 
-  font-size: 18px; 
-}
-#usersList { 
-  flex: 1; 
-  overflow-y: auto; 
-  padding: 8px; 
-  display: flex; 
-  flex-direction: column; 
-}
-.userItem { 
-  display: flex; 
-  align-items: center; 
-  gap: 12px; 
-  padding: 12px; 
-  border-radius: 8px; 
-  cursor: pointer; 
-  transition: background-color 0.2s; 
-}
-.userItem:hover { 
-  background: rgba(255, 255, 255, 0.05); 
-}
-.miniAvatar { 
-  width: 40px; 
-  height: 40px; 
-  border-radius: 50%; 
-  flex-shrink: 0; 
-  display: flex; 
-  align-items: center; 
-  justify-content: center; 
-  font-weight: 600; 
-  color: #fff; 
-}
-.userInfo { 
-  flex: 1; 
-  min-width: 0;
-  overflow: hidden;
-}
-.userName { 
-  font-weight: 500; 
-  font-size: 15px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.userStatus { 
-  font-size: 13px; 
-  color: var(--text-secondary); 
-}
-.userStatus:first-letter { 
-  text-transform: uppercase; 
-}
-
-/* Admin Panel */
-#adminPanel { 
-  display: flex;
-  flex-wrap: wrap; 
-  gap: 8px; 
-  padding: 12px; 
-  border-top: 1px solid var(--panel-border); 
-  background: var(--background-dark); 
-}
-#adminPanel input { 
-  flex: 1; 
-  min-width: 120px;
-  padding: 10px; 
-  border-radius: 6px; 
-  border: 1px solid var(--panel-border); 
-  background: var(--panel-bg); 
-  color: var(--text-primary); 
-  font-size: 14px; 
-}
-#adminPanel button { 
-  padding: 10px 12px; 
-  border-radius: 6px; 
-  border: none; 
-  cursor: pointer; 
-  font-weight: 500; 
-  background: #333; 
-  color: #fff; 
-  font-size: 14px; 
-  flex: 1;
-  min-width: 100px;
-}
-#adminPanel button:last-of-type { 
-  background: #c62828; 
-}
-
-/* Right Panel (Chat Area) */
-.topbar { 
-  padding: 0 16px; 
-  height: 64px; 
-  display: flex; 
-  justify-content: space-between; 
-  align-items: center; 
-  border-bottom: 1px solid var(--panel-border); 
-  flex-shrink: 0; 
-}
-#backToUsersBtn { 
-  display: none; 
-  background: none; 
-  border: none; 
-  color: var(--text-primary); 
-  font-size: 22px; 
-  cursor: pointer; 
-  margin-right: 10px; 
-  padding: 8px;
-}
-#meInfo strong { 
-  font-size: 16px; 
-}
-#meInfo span { 
-  color: var(--text-secondary); 
-  font-size: 13px; 
-  margin-left: 4px; 
-}
-#logoutBtn { 
-  background: #c62828; 
-  padding: 8px 14px; 
-  border-radius: 6px; 
-  border: none; 
-  color: #fff; 
-  cursor: pointer; 
-  font-size: 14px;
-}
-#messages { 
-  flex: 1; 
-  overflow-y: auto; 
-  padding: 16px;
-  display: flex; 
-  flex-direction: column; 
-  gap: 8px; 
-  background-color: var(--background-dark);
-  min-height: 0;
-}
-.msgRow { 
-  display: flex; 
-  max-width: 80%;
-  margin-bottom: 8px; 
-}
-.msgRow.me { 
-  align-self: flex-end; 
-}
-.msgRow.other { 
-  align-self: flex-start; 
-}
-.bubble { 
-  padding: 10px 14px; 
-  border-radius: 16px; 
-  color: var(--text-primary); 
-  max-width: 100%; 
-  word-wrap: break-word; 
-}
-.msgRow.me .bubble { 
-  background: var(--my-bubble-bg); 
-  border-bottom-right-radius: 4px; 
-}
-.msgRow.other .bubble { 
-  background: var(--other-bubble-bg); 
-  border-bottom-left-radius: 4px; 
-}
-.bubble .meta { 
-  font-size: 12px; 
-  opacity: 0.8; 
-}
-.bubble .meta.name { 
-  font-weight: 600; 
-  margin-bottom: 4px; 
-}
-.bubble .meta.footer { 
-  text-align: right; 
-  margin-top: 6px; 
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 4px;
-}
-.bubble .text { 
-  line-height: 1.4; 
-  white-space: pre-wrap; 
-  font-size: 15px;
-}
-.chat-media { 
-  max-width: 100%; 
-  max-height: 300px;
-  border-radius: 10px; 
-  margin-top: 5px; 
-}
-.ticks { 
-  margin-left: 5px; 
-  font-size: 14px; 
-  font-weight: bold; 
-}
-.composer { 
-  display: flex; 
-  gap: 10px; 
-  align-items: flex-end; 
-  padding: 12px 16px; 
-  border-top: 1px solid var(--panel-border); 
-  flex-shrink: 0; 
-}
-.composer textarea {
-  flex: 1;
-  padding: 12px 16px;
-  border: none;
-  border-radius: 20px;
-  background: var(--other-bubble-bg);
-  color: var(--text-primary);
-  font-family: inherit;
-  font-size: 15px;
-  line-height: 1.4;
-  outline: none;
-  resize: none;
-  overflow-y: auto;
-  max-height: 120px;
-  min-height: 44px;
-}
-.composer textarea::-webkit-scrollbar { 
-  width: 5px; 
-}
-.composer textarea::-webkit-scrollbar-thumb { 
-  background-color: var(--panel-border); 
-  border-radius: 10px; 
-}
-.composer button { 
-  width: 44px; 
-  height: 44px; 
-  border: none; 
-  border-radius: 50%; 
-  background: var(--accent-color); 
-  color: #fff; 
-  font-size: 18px; 
-  flex-shrink: 0; 
-  display: flex; 
-  align-items: center; 
-  justify-content: center; 
-  cursor: pointer; 
-}
-
-/* --- Mobile Responsive Design --- */
-@media (max-width: 1024px) {
-  #mainView { 
-    grid-template-columns: minmax(220px, 280px) 1fr; 
-  }
-}
-
-@media (max-width: 768px) {
-  html, body {
-    font-size: 15px;
-  }
-  
-  #mainView { 
-    grid-template-columns: 1fr; 
-  }
-  .leftPanel, .rightPanel { 
-    position: absolute; 
-    top: 0; 
-    left: 0; 
-    width: 100%; 
-    height: 100%; 
-    transition: transform 0.3s ease-in-out; 
-  }
-  .leftPanel { 
-    z-index: 10; 
-  }
-  .rightPanel { 
-    transform: translateX(100%); 
-    z-index: 20; 
-  }
-  body.show-chat-panel .leftPanel { 
-    transform: translateX(-100%); 
-  }
-  body.show-chat-panel .rightPanel { 
-    transform: translateX(0); 
-  }
-  .topbar { 
-    padding: 0 12px; 
-    height: 60px;
-  }
-  #backToUsersBtn { 
-    display: block; 
-  }
-  .msgRow {
-    max-width: 90%;
-  }
-  .composer {
-    padding: 10px 12px;
-  }
-  .panelHeader {
-    padding: 12px;
-    min-height: 60px;
-  }
-}
-
-@media (max-width: 480px) {
-  .loginCard {
-    padding: 20px;
-  }
-  
-  .panelHeader {
-    padding: 12px;
-  }
-  
-  .userItem {
-    padding: 10px;
-  }
-  
-  #messages {
-    padding: 12px;
-  }
-  
-  .bubble {
-    padding: 8px 12px;
-  }
-  
-  .composer {
-    gap: 8px;
-    padding: 10px;
-  }
-  
-  .composer button {
-    width: 40px;
-    height: 40px;
-  }
-  
-  #adminPanel {
-    padding: 10px;
-  }
-  
-  #adminPanel input, #adminPanel button {
-    min-width: 0;
-    flex: 1 1 100%;
-  }
-}
-
-@media (max-width: 768px) and (orientation: landscape) {
-  .panelHeader {
-    min-height: 50px;
-    padding: 8px 12px;
-  }
-  
-  .topbar {
-    height: 50px;
-  }
-  
-  .composer { 
-    padding: 8px 12px; 
-    align-items: center;
-  }
-  
-  .composer textarea { 
-    max-height: 80px; 
-    min-height: 36px;
-  }
-  
-  .composer button { 
-    width: 40px; 
-    height: 40px; 
-  }
-}
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KikoChat - Premium Messaging</title>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
-
-<div id="loginView">
-  <div class="loginCard">
-    <div class="logoWrap"><div class="logoCat">🐱</div><div class="logoText">KikoChat</div></div>
-    <input id="usernameLogin" placeholder="Username"/>
-    <input id="passLogin" type="password" placeholder="Passcode"/>
-    <button id="loginButton">Login</button>
-  </div>
-</div>
-
-<div id="mainView" style="display:none">
-  <div class="leftPanel">
-    <div class="panelHeader">
-        <div class="logoCat">🐱</div>
-        <div class="logoText">KikoChat</div>
-    </div>
-    <div id="usersList"></div>
-    <div id="adminPanel" style="display:none">
-      <input id="newUsername" placeholder="username"/>
-      <input id="newPass" placeholder="pass"/>
-      <button id="addUserBtn">+ User</button>
-      <button id="addAdminBtn">+ Admin</button>
-      <button id="clearChatBtn">Clear Chat</button>
-    </div>
-  </div>
-  <div class="rightPanel">
-    <div class="topbar">
-      <div style="display: flex; align-items: center;">
-        <button id="backToUsersBtn" aria-label="Back to users list">&larr;</button>
-        <div id="meInfo">
-            <strong id="meName"></strong> <span id="meRole"></span>
+    <!-- Animated Background -->
+    <div class="gradient-bg"></div>
+    
+    <!-- Login Page -->
+    <div id="loginPage" class="login-page">
+        <div class="login-container">
+            <div class="login-header">
+                <h1 class="brand-logo">KikoChat</h1>
+                <h2 class="welcome-text">Welcome To KikoChat</h2>
+            </div>
+            
+            <div class="login-form-container">
+                <div class="login-tabs">
+                    <button type="button" class="tab-btn active" onclick="switchTab('login')">Login</button>
+                    <button type="button" class="tab-btn" onclick="switchTab('admin')">Admin</button>
+                </div>
+                
+                <!-- Login Form -->
+                <form id="loginForm" class="auth-form active">
+                    <div class="form-group">
+                        <label class="form-label">Username</label>
+                        <input type="text" id="loginUsername" class="form-control" placeholder="Enter your username" required autocomplete="username">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Passcode</label>
+                        <input type="password" id="loginPasscode" class="form-control" placeholder="Enter your passcode" required autocomplete="current-password">
+                    </div>
+                    <button type="submit" class="btn btn--primary btn--full-width">Sign In</button>
+                </form>
+                
+                <!-- Admin Form -->
+                <form id="adminForm" class="auth-form" style="display: none;">
+                    <h3 style="margin-bottom: 20px; text-align: center;">Admin: Create User</h3>
+                    <div class="form-group">
+                        <label class="form-label">New Username</label>
+                        <input type="text" id="adminCreateUsername" class="form-control" placeholder="Enter new username" required autocomplete="off">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">New Passcode</label>
+                        <input type="password" id="adminCreatePasscode" class="form-control" placeholder="Set user's passcode" required autocomplete="new-password">
+                    </div>
+                    <hr style="margin: 24px 0; border: 1px solid var(--color-border);">
+                    <div class="form-group">
+                        <label class="form-label">Admin Username</label>
+                        <input type="text" id="adminUsername" class="form-control" placeholder="Enter your admin username" required autocomplete="username">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Admin Passcode</label>
+                        <input type="password" id="adminPasscode" class="form-control" placeholder="Enter your admin passcode" required autocomplete="current-password">
+                    </div>
+                    <button type="submit" class="btn btn--primary btn--full-width">Create User</button>
+                </form>
+            </div>
         </div>
-      </div>
-      <button id="logoutBtn">Logout</button>
     </div>
-    <div id="messages"></div>
-    <div class="composer">
-      <button id="attachBtn">📎</button>
-      <input type="file" id="fileInput" accept="image/*,video/*" hidden/>
-      <textarea id="textInput" placeholder="Type a message..." rows="1"></textarea>
-      <button id="sendBtn">➤</button>
+    
+    <!-- Main Chat Application -->
+    <div id="chatApp" class="chat-app hidden">
+        <!-- Desktop Layout -->
+        <div class="main-container">
+            <!-- Sidebar Navigation -->
+            <aside class="sidebar">
+                <div class="sidebar-header">
+                    <h2 class="brand-logo">KikoChat</h2>
+                    <div class="user-info">
+                        <div class="user-avatar">
+                            <img id="currentUserAvatar" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2333808d'%3E%3Cpath d='M12 2C13.1 2 14 2.9 14 4C14 5.1 13.1 6 12 6C10.9 6 10 5.1 10 4C10 2.9 10.9 2 12 2ZM21 9V7L12 2L3 7V9H21ZM12 17C8.69 17 6 14.31 6 11V9H18V11C18 14.31 15.31 17 12 17Z'/%3E%3C/svg%3E" alt="Avatar">
+                        </div>
+                        <div class="user-details">
+                            <span id="currentUserName" class="user-name">User</span>
+                            <span id="currentUserHashtag" class="user-hashtag">#user</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <nav class="sidebar-nav">
+                    <button class="nav-item active" data-tab="chats" onclick="switchMainTab('chats')">
+                        <span class="nav-icon">💬</span>
+                        <span class="nav-text">Chats</span>
+                    </button>
+                    <button class="nav-item" data-tab="profile" onclick="switchMainTab('profile')">
+                        <span class="nav-icon">👤</span>
+                        <span class="nav-text">Profile</span>
+                    </button>
+                    <button class="nav-item" data-tab="settings" onclick="switchMainTab('settings')">
+                        <span class="nav-icon">⚙️</span>
+                        <span class="nav-text">Settings</span>
+                    </button>
+                    <button class="nav-item" id="adminNav" data-tab="admin" onclick="switchMainTab('admin')" style="display: none;">
+                        <span class="nav-icon">🛡️</span>
+                        <span class="nav-text">Admin</span>
+                    </button>
+                    <button class="nav-item logout-btn" onclick="logout()">
+                        <span class="nav-icon">🚪</span>
+                        <span class="nav-text">Logout</span>
+                    </button>
+                </nav>
+            </aside>
+            
+            <!-- Chat List Panel -->
+            <div class="chat-list-panel">
+                <div class="panel-header">
+                    <h3>Conversations</h3>
+                    <button class="new-chat-btn" onclick="startNewChat()">+</button>
+                </div>
+                <div class="chat-list-container">
+                    <div id="chatList" class="chat-list">
+                        <!-- Chat items will be populated here -->
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Main Content Area -->
+            <main class="main-content">
+                <!-- Chat View -->
+                <div id="chatsView" class="content-panel">
+                    <div class="chat-wallpaper"></div>
+                    <div class="chat-header">
+                        <div class="chat-info">
+                            <div class="chat-avatar">
+                                <img id="chatAvatar" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2333808d'%3E%3Cpath d='M12 2C13.1 2 14 2.9 14 4C14 5.1 13.1 6 12 6C10.9 6 10 5.1 10 4C10 2.9 10.9 2 12 2ZM21 9V7L12 2L3 7V9H21ZM12 17C8.69 17 6 14.31 6 11V9H18V11C18 14.31 15.31 17 12 17Z'/%3E%3C/svg%3E" alt="Avatar">
+                            </div>
+                            <div class="chat-details">
+                                <h3 id="chatName">Select a chat</h3>
+                                <span id="chatStatus" class="chat-status">Click a chat to start messaging</span>
+                            </div>
+                        </div>
+                        <div class="chat-actions">
+                            <button class="action-btn" onclick="toggleWallpaper()" title="Toggle Wallpaper">🎨</button>
+                        </div>
+                    </div>
+                    
+                    <div id="messagesContainer" class="messages-container">
+                        <div id="messagesList" class="messages-list">
+                            <div class="welcome-message">
+                                <h3>Welcome to KikoChat!</h3>
+                                <p>Select a conversation from the left to start chatting.</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="message-composer">
+                        <div class="composer-input-container">
+                            <textarea id="messageInput" class="message-input" placeholder="Type a message..." rows="1" onkeypress="handleMessageKeyPress(event)"></textarea>
+                        </div>
+                        <div class="composer-actions">
+                            <button class="composer-btn" onclick="startVoiceRecording()" id="voiceRecordBtn" title="Voice Note">🎤</button>
+                            <button class="composer-btn" onclick="startVideoRecording()" id="videoRecordBtn" title="Video Note">🎥</button>
+                            <button class="composer-btn btn--primary" onclick="sendMessage()" id="sendBtn">Send</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Profile View -->
+                <div id="profileView" class="content-panel hidden">
+                    <div class="profile-container">
+                        <h2>Profile Settings</h2>
+                        <div class="profile-form">
+                            <div class="avatar-section">
+                                <div class="avatar-preview">
+                                    <img id="profileAvatar" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2333808d'%3E%3Cpath d='M12 2C13.1 2 14 2.9 14 4C14 5.1 13.1 6 12 6C10.9 6 10 5.1 10 4C10 2.9 10.9 2 12 2ZM21 9V7L12 2L3 7V9H21ZM12 17C8.69 17 6 14.31 6 11V9H18V11C18 14.31 15.31 17 12 17Z'/%3E%3C/svg%3E" alt="Profile">
+                                </div>
+                                <button class="btn btn--secondary" onclick="changeAvatar()">Change Avatar</button>
+                                <input type="file" id="avatarInput" accept="image/*" style="display: none;">
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label">Username (Admin Only)</label>
+                                <input type="text" id="profileUsername" class="form-control" disabled>
+                                <small class="form-help">Only admins can change usernames</small>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label">Hashtag (Admin Only)</label>
+                                <input type="text" id="profileHashtag" class="form-control" disabled>
+                                <small class="form-help">Only admins can change hashtags</small>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label">Bio</label>
+                                <textarea id="profileBio" class="form-control" rows="3" placeholder="Tell us about yourself..."></textarea>
+                            </div>
+                            
+                            <button class="btn btn--primary" onclick="updateProfile()">Update Profile</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Settings View -->
+                <div id="settingsView" class="content-panel hidden">
+                    <div class="settings-container">
+                        <h2>Settings</h2>
+                        <div class="settings-section">
+                            <h3>Chat Wallpapers</h3>
+                            <div class="setting-item">
+                                <label class="setting-label">
+                                    <input type="checkbox" id="wallpaperToggle" checked onchange="toggleWallpaperEnabled(event)">
+                                    <span class="checkmark"></span>
+                                    Enable Chat Wallpapers
+                                </label>
+                            </div>
+                            <div class="wallpaper-options" id="wallpaperOptions">
+                                <h4>Choose Wallpaper</h4>
+                                <div class="wallpaper-grid">
+                                    <div class="wallpaper-option active" data-wallpaper="gradient-1" onclick="selectWallpaper(event)">
+                                        <div class="wallpaper-preview gradient-1"></div>
+                                        <span>Gradient 1</span>
+                                    </div>
+                                    <div class="wallpaper-option" data-wallpaper="gradient-2" onclick="selectWallpaper(event)">
+                                        <div class="wallpaper-preview gradient-2"></div>
+                                        <span>Gradient 2</span>
+                                    </div>
+                                    <div class="wallpaper-option" data-wallpaper="abstract-1" onclick="selectWallpaper(event)">
+                                        <div class="wallpaper-preview abstract-1"></div>
+                                        <span>Abstract 1</span>
+                                    </div>
+                                    <div class="wallpaper-option" data-wallpaper="abstract-2" onclick="selectWallpaper(event)">
+                                        <div class="wallpaper-preview abstract-2"></div>
+                                        <span>Abstract 2</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Admin Panel -->
+                <div id="adminView" class="content-panel hidden">
+                    <div class="admin-container">
+                        <h2>Admin Panel</h2>
+                        <div class="admin-section">
+                            <h3>Manage Users</h3>
+                            <div id="userList" class="user-management-list">
+                                <!-- Users will be populated here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+        
+        <!-- Mobile Bottom Navigation -->
+        <nav class="mobile-nav">
+            <button class="mobile-nav-item active" data-tab="chats" onclick="switchMainTab('chats')">💬</button>
+            <button class="mobile-nav-item" data-tab="profile" onclick="switchMainTab('profile')">👤</button>
+            <button class="mobile-nav-item" data-tab="settings" onclick="switchMainTab('settings')">⚙️</button>
+            <button class="mobile-nav-item" onclick="logout()">🚪</button>
+        </nav>
     </div>
-  </div>
-</div>
-
+    
+    <!-- Recording Modal -->
+    <div id="recordingModal" class="modal hidden">
+        <div class="modal-content">
+            <div class="recording-interface">
+                <div class="recording-header">
+                    <h3 id="recordingTitle">Recording Voice Note</h3>
+                    <button class="close-btn" onclick="cancelRecording()">×</button>
+                </div>
+                <div class="recording-visualizer">
+                    <div class="waveform" id="waveform">
+                        <div class="wave-bar"></div>
+                        <div class="wave-bar"></div>
+                        <div class="wave-bar"></div>
+                        <div class="wave-bar"></div>
+                        <div class="wave-bar"></div>
+                    </div>
+                    <video id="videoPreview" class="video-preview hidden" muted></video>
+                </div>
+                <div class="recording-info">
+                    <span id="recordingDuration">00:00</span>
+                    <span id="recordingStatus">Press and hold to record</span>
+                </div>
+                <div class="recording-controls">
+                    <button class="record-btn" id="recordBtn" onmousedown="startRecording()" onmouseup="stopRecording()">
+                        <span class="record-icon">⚫</span>
+                    </button>
+                    <button class="btn btn--secondary" onclick="cancelRecording()">Cancel</button>
+                    <button class="btn btn--primary" onclick="sendRecording()" id="sendRecordingBtn" disabled>Send</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- User Selection Modal -->
+    <div id="userSelectModal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Start New Chat</h3>
+                <button class="close-btn" onclick="closeUserSelectModal()">×</button>
+            </div>
+            <div class="modal-body">
+                <div id="availableUsers" class="user-select-list">
+                    <!-- Available users will be populated here -->
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="app.js"></script>
 </body>
 </html>
