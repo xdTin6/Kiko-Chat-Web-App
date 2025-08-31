@@ -1,338 +1,83 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KikoChat - Premium Messaging</title>
-    <link rel="stylesheet" href="style.css">
-
-    <!-- Firebase App (the core Firebase SDK) -->
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
-    <!-- Firebase Authentication -->
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
-    <!-- Firebase Realtime Database -->
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
-
-    <!-- Initialize Firebase -->
-    <script>
-        // Replace these with your Firebase project's config
-        const firebaseConfig = {
-            apiKey: "AIzaSyAe_ZfZ8rKCke47UeA9Kcs8cXpD6-G6RAQ",
-            authDomain: "kiko-chat-b6435.firebaseapp.com",
-            databaseURL: "https://kiko-chat-b6435-default-rtdb.firebaseio.com",
-            projectId: "kiko-chat-b6435",
-            storageBucket: "kiko-chat-b6435.appspot.com",
-            messagingSenderId: "896370793240",
-            appId: "1:896370793240:web:3f14442a5d80cd71fb1c6d"
-        };
-
-        // Initialize Firebase
-        firebase.initializeApp(firebaseConfig);
-
-        // References to Auth and Database
-        const auth = firebase.auth();
-        const database = firebase.database();
-    </script>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>KikoChat — Single File (Firebase-ready)</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #f5f5f5; }
+    .login-page { display: flex; justify-content: center; align-items: center; height: 100vh; }
+    .login-container { background: #fff; padding: 20px; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1); width: 300px; }
+    input { width: 100%; padding: 10px; margin: 10px 0; border-radius: 5px; border: 1px solid #ccc; }
+    button { background: #21808d; color: white; border: none; padding: 10px; width: 100%; border-radius: 5px; cursor: pointer; }
+    button:hover { background: #1a666e; }
+    #loginError { color: red; display: none; margin-top: 10px; }
+  </style>
 </head>
 <body>
-    <!-- Animated Background -->
-    <div class="gradient-bg"></div>
-    
-    <!-- Login Page -->
-    <div id="loginPage" class="login-page">
-        <div class="login-container">
-            <div class="login-header">
-                <h1 class="brand-logo">KikoChat</h1>
-                <h2 class="welcome-text">Welcome To KikoChat</h2>
-            </div>
-            
-            <div class="login-form-container">
-                <div class="login-tabs">
-                    <button type="button" class="tab-btn active" onclick="switchTab('login')">Login</button>
-                    <button type="button" class="tab-btn" onclick="switchTab('admin')">Admin</button>
-                </div>
-                
-                <!-- Login Form -->
-                <form id="loginForm" class="auth-form active">
-                    <div class="form-group">
-                        <label class="form-label">Username</label>
-                        <input type="text" id="loginUsername" class="form-control" placeholder="Enter your username" required autocomplete="username">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Passcode</label>
-                        <input type="password" id="loginPasscode" class="form-control" placeholder="Enter your passcode" required autocomplete="current-password">
-                    </div>
-                    <button type="submit" class="btn btn--primary btn--full-width">Sign In</button>
-                </form>
-                
-                <!-- Admin Form -->
-                <form id="adminForm" class="auth-form" style="display: none;">
-                    <h3 style="margin-bottom: 20px; text-align: center;">Admin: Create User</h3>
-                    <div class="form-group">
-                        <label class="form-label">New Username</label>
-                        <input type="text" id="adminCreateUsername" class="form-control" placeholder="Enter new username" required autocomplete="off">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">New Passcode</label>
-                        <input type="password" id="adminCreatePasscode" class="form-control" placeholder="Set user's passcode" required autocomplete="new-password">
-                    </div>
-                    <hr style="margin: 24px 0; border: 1px solid var(--color-border);">
-                    <div class="form-group">
-                        <label class="form-label">Admin Username</label>
-                        <input type="text" id="adminUsername" class="form-control" placeholder="Enter your admin username" required autocomplete="username">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Admin Passcode</label>
-                        <input type="password" id="adminPasscode" class="form-control" placeholder="Enter your admin passcode" required autocomplete="current-password">
-                    </div>
-                    <button type="submit" class="btn btn--primary btn--full-width">Create User</button>
-                </form>
-            </div>
-        </div>
+  <div class="login-page">
+    <div class="login-container">
+      <h2>KikoChat Login</h2>
+      <input type="text" id="loginUsername" placeholder="Username" required />
+      <input type="password" id="loginPasscode" placeholder="Passcode" required />
+      <button id="loginBtn">Login</button>
+      <p id="loginError">Invalid username or passcode.</p>
     </div>
-    
-    <!-- Main Chat Application -->
-    <div id="chatApp" class="chat-app hidden">
-        <!-- Desktop Layout -->
-        <div class="main-container">
-            <!-- Sidebar Navigation -->
-            <aside class="sidebar">
-                <div class="sidebar-header">
-                    <h2 class="brand-logo">KikoChat</h2>
-                    <div class="user-info">
-                        <div class="user-avatar">
-                            <img id="currentUserAvatar" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2333808d'%3E%3Cpath d='M12 2C13.1 2 14 2.9 14 4C14 5.1 13.1 6 12 6C10.9 6 10 5.1 10 4C10 2.9 10.9 2 12 2ZM21 9V7L12 2L3 7V9H21ZM12 17C8.69 17 6 14.31 6 11V9H18V11C18 14.31 15.31 17 12 17Z'/%3E%3C/svg%3E" alt="Avatar">
-                        </div>
-                        <div class="user-details">
-                            <span id="currentUserName" class="user-name">User</span>
-                            <span id="currentUserHashtag" class="user-hashtag">#user</span>
-                        </div>
-                    </div>
-                </div>
-                
-                <nav class="sidebar-nav">
-                    <button class="nav-item active" data-tab="chats" onclick="switchMainTab('chats')">
-                        <span class="nav-icon">💬</span>
-                        <span class="nav-text">Chats</span>
-                    </button>
-                    <button class="nav-item" data-tab="profile" onclick="switchMainTab('profile')">
-                        <span class="nav-icon">👤</span>
-                        <span class="nav-text">Profile</span>
-                    </button>
-                    <button class="nav-item" data-tab="settings" onclick="switchMainTab('settings')">
-                        <span class="nav-icon">⚙️</span>
-                        <span class="nav-text">Settings</span>
-                    </button>
-                    <button class="nav-item" id="adminNav" data-tab="admin" onclick="switchMainTab('admin')" style="display: none;">
-                        <span class="nav-icon">🛡️</span>
-                        <span class="nav-text">Admin</span>
-                    </button>
-                    <button class="nav-item logout-btn" onclick="logout()">
-                        <span class="nav-icon">🚪</span>
-                        <span class="nav-text">Logout</span>
-                    </button>
-                </nav>
-            </aside>
-            
-            <!-- Chat List Panel -->
-            <div class="chat-list-panel">
-                <div class="panel-header">
-                    <h3>Conversations</h3>
-                    <button class="new-chat-btn" onclick="startNewChat()">+</button>
-                </div>
-                <div class="chat-list-container">
-                    <div id="chatList" class="chat-list">
-                        <!-- Chat items will be populated here -->
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Main Content Area -->
-            <main class="main-content">
-                <!-- Chat View -->
-                <div id="chatsView" class="content-panel">
-                    <div class="chat-wallpaper"></div>
-                    <div class="chat-header">
-                        <div class="chat-info">
-                            <div class="chat-avatar">
-                                <img id="chatAvatar" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2333808d'%3E%3Cpath d='M12 2C13.1 2 14 2.9 14 4C14 5.1 13.1 6 12 6C10.9 6 10 5.1 10 4C10 2.9 10.9 2 12 2ZM21 9V7L12 2L3 7V9H21ZM12 17C8.69 17 6 14.31 6 11V9H18V11C18 14.31 15.31 17 12 17Z'/%3E%3C/svg%3E" alt="Avatar">
-                            </div>
-                            <div class="chat-details">
-                                <h3 id="chatName">Select a chat</h3>
-                                <span id="chatStatus" class="chat-status">Click a chat to start messaging</span>
-                            </div>
-                        </div>
-                        <div class="chat-actions">
-                            <button class="action-btn" onclick="toggleWallpaper()" title="Toggle Wallpaper">🎨</button>
-                        </div>
-                    </div>
-                    
-                    <div id="messagesContainer" class="messages-container">
-                        <div id="messagesList" class="messages-list">
-                            <div class="welcome-message">
-                                <h3>Welcome to KikoChat!</h3>
-                                <p>Select a conversation from the left to start chatting.</p>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="message-composer">
-                        <div class="composer-input-container">
-                            <textarea id="messageInput" class="message-input" placeholder="Type a message..." rows="1" onkeypress="handleMessageKeyPress(event)"></textarea>
-                        </div>
-                        <div class="composer-actions">
-                            <button class="composer-btn" onclick="startVoiceRecording()" id="voiceRecordBtn" title="Voice Note">🎤</button>
-                            <button class="composer-btn" onclick="startVideoRecording()" id="videoRecordBtn" title="Video Note">🎥</button>
-                            <button class="composer-btn btn--primary" onclick="sendMessage()" id="sendBtn">Send</button>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Profile View -->
-                <div id="profileView" class="content-panel hidden">
-                    <div class="profile-container">
-                        <h2>Profile Settings</h2>
-                        <div class="profile-form">
-                            <div class="avatar-section">
-                                <div class="avatar-preview">
-                                    <img id="profileAvatar" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2333808d'%3E%3Cpath d='M12 2C13.1 2 14 2.9 14 4C14 5.1 13.1 6 12 6C10.9 6 10 5.1 10 4C10 2.9 10.9 2 12 2ZM21 9V7L12 2L3 7V9H21ZM12 17C8.69 17 6 14.31 6 11V9H18V11C18 14.31 15.31 17 12 17Z'/%3E%3C/svg%3E" alt="Profile">
-                                </div>
-                                <button class="btn btn--secondary" onclick="changeAvatar()">Change Avatar</button>
-                                <input type="file" id="avatarInput" accept="image/*" style="display: none;">
-                            </div>
-                            
-                            <div class="form-group">
-                                <label class="form-label">Username (Admin Only)</label>
-                                <input type="text" id="profileUsername" class="form-control" disabled>
-                                <small class="form-help">Only admins can change usernames</small>
-                            </div>
-                            
-                            <div class="form-group">
-                                <label class="form-label">Hashtag (Admin Only)</label>
-                                <input type="text" id="profileHashtag" class="form-control" disabled>
-                                <small class="form-help">Only admins can change hashtags</small>
-                            </div>
-                            
-                            <div class="form-group">
-                                <label class="form-label">Bio</label>
-                                <textarea id="profileBio" class="form-control" rows="3" placeholder="Tell us about yourself..."></textarea>
-                            </div>
-                            
-                            <button class="btn btn--primary" onclick="updateProfile()">Update Profile</button>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Settings View -->
-                <div id="settingsView" class="content-panel hidden">
-                    <div class="settings-container">
-                        <h2>Settings</h2>
-                        <div class="settings-section">
-                            <h3>Chat Wallpapers</h3>
-                            <div class="setting-item">
-                                <label class="setting-label">
-                                    <input type="checkbox" id="wallpaperToggle" checked onchange="toggleWallpaperEnabled(event)">
-                                    <span class="checkmark"></span>
-                                    Enable Chat Wallpapers
-                                </label>
-                            </div>
-                            <div class="wallpaper-options" id="wallpaperOptions">
-                                <h4>Choose Wallpaper</h4>
-                                <div class="wallpaper-grid">
-                                    <div class="wallpaper-option active" data-wallpaper="gradient-1" onclick="selectWallpaper(event)">
-                                        <div class="wallpaper-preview gradient-1"></div>
-                                        <span>Gradient 1</span>
-                                    </div>
-                                    <div class="wallpaper-option" data-wallpaper="gradient-2" onclick="selectWallpaper(event)">
-                                        <div class="wallpaper-preview gradient-2"></div>
-                                        <span>Gradient 2</span>
-                                    </div>
-                                    <div class="wallpaper-option" data-wallpaper="abstract-1" onclick="selectWallpaper(event)">
-                                        <div class="wallpaper-preview abstract-1"></div>
-                                        <span>Abstract 1</span>
-                                    </div>
-                                    <div class="wallpaper-option" data-wallpaper="abstract-2" onclick="selectWallpaper(event)">
-                                        <div class="wallpaper-preview abstract-2"></div>
-                                        <span>Abstract 2</span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Admin Panel -->
-                <div id="adminView" class="content-panel hidden">
-                    <div class="admin-container">
-                        <h2>Admin Panel</h2>
-                        <div class="admin-section">
-                            <h3>Manage Users</h3>
-                            <div id="userList" class="user-management-list">
-                                <!-- Users will be populated here -->
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </main>
-        </div>
-        
-        <!-- Mobile Bottom Navigation -->
-        <nav class="mobile-nav">
-            <button class="mobile-nav-item active" data-tab="chats" onclick="switchMainTab('chats')">💬</button>
-            <button class="mobile-nav-item" data-tab="profile" onclick="switchMainTab('profile')">👤</button>
-            <button class="mobile-nav-item" data-tab="settings" onclick="switchMainTab('settings')">⚙️</button>
-            <button class="mobile-nav-item" onclick="logout()">🚪</button>
-        </nav>
-    </div>
-    
-    <!-- Recording Modal -->
-    <div id="recordingModal" class="modal hidden">
-        <div class="modal-content">
-            <div class="recording-interface">
-                <div class="recording-header">
-                    <h3 id="recordingTitle">Recording Voice Note</h3>
-                    <button class="close-btn" onclick="cancelRecording()">×</button>
-                </div>
-                <div class="recording-visualizer">
-                    <div class="waveform" id="waveform">
-                        <div class="wave-bar"></div>
-                        <div class="wave-bar"></div>
-                        <div class="wave-bar"></div>
-                        <div class="wave-bar"></div>
-                        <div class="wave-bar"></div>
-                    </div>
-                    <video id="videoPreview" class="video-preview hidden" muted></video>
-                </div>
-                <div class="recording-info">
-                    <span id="recordingDuration">00:00</span>
-                    <span id="recordingStatus">Press and hold to record</span>
-                </div>
-                <div class="recording-controls">
-                    <button class="record-btn" id="recordBtn" onmousedown="startRecording()" onmouseup="stopRecording()">
-                        <span class="record-icon">⚫</span>
-                    </button>
-                    <button class="btn btn--secondary" onclick="cancelRecording()">Cancel</button>
-                    <button class="btn btn--primary" onclick="sendRecording()" id="sendRecordingBtn" disabled>Send</button>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <!-- User Selection Modal -->
-    <div id="userSelectModal" class="modal hidden">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Start New Chat</h3>
-                <button class="close-btn" onclick="closeUserSelectModal()">×</button>
-            </div>
-            <div class="modal-body">
-                <div id="availableUsers" class="user-select-list">
-                    <!-- Available users will be populated here -->
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <script src="app.js"></script>
+  </div>
+
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
+  <script>
+    // Firebase config provided
+    const firebaseConfig = {
+      apiKey: "AIzaSyAe_ZfZ8rKCke47UeA9Kcs8cXpD6-G6RAQ",
+      authDomain: "kiko-chat-b6435.firebaseapp.com",
+      databaseURL: "https://kiko-chat-b6435-default-rtdb.firebaseio.com",
+      projectId: "kiko-chat-b6435",
+      storageBucket: "kiko-chat-b6435.appspot.com",
+      messagingSenderId: "896370793240",
+      appId: "1:896370793240:web:3f14442a5d80cd71fb1c6d"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    const loginBtn = document.getElementById('loginBtn');
+    const loginError = document.getElementById('loginError');
+
+    loginBtn.addEventListener('click', async () => {
+      const username = document.getElementById('loginUsername').value.trim();
+      const passcode = document.getElementById('loginPasscode').value.trim();
+
+      if (!username || !passcode) {
+        loginError.textContent = "Please fill out all fields.";
+        loginError.style.display = "block";
+        return;
+      }
+
+      try {
+        const snapshot = await db.ref('users/' + username).get();
+        if (!snapshot.exists()) {
+          loginError.textContent = "User not found.";
+          loginError.style.display = "block";
+          return;
+        }
+
+        const user = snapshot.val();
+        if (String(user.passcode) !== String(passcode)) {
+          loginError.textContent = "Incorrect passcode.";
+          loginError.style.display = "block";
+          return;
+        }
+
+        alert("Welcome " + username + "! You are logged in successfully.");
+        loginError.style.display = "none";
+      } catch (error) {
+        console.error(error);
+        loginError.textContent = "Error logging in.";
+        loginError.style.display = "block";
+      }
+    });
+  </script>
 </body>
 </html>
