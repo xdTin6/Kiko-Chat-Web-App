@@ -45,8 +45,8 @@ let state = {
   messages: {},
   typing: {},
   reactions: {},
-  theme: localStorage.getItem('kikochat-theme') || 'dark',
-  soundEnabled: localStorage.getItem('kikochat-sound') !== 'false',
+  theme: sessionStorage.getItem('kikochat-theme') || 'dark',
+  soundEnabled: sessionStorage.getItem('kikochat-sound') !== 'false',
   replyingTo: null,
   searchQuery: '',
   showEmojiPicker: false
@@ -113,7 +113,7 @@ function playNotificationSound() {
 function setTheme(theme) {
   state.theme = theme;
   document.documentElement.setAttribute('data-theme', theme);
-  localStorage.setItem('kikochat-theme', theme);
+  sessionStorage.setItem('kikochat-theme', theme);
   updateThemeToggle();
 }
 
@@ -750,7 +750,7 @@ function bindEvents() {
   // Sound toggle
   elements.soundToggle?.addEventListener('click', () => {
     state.soundEnabled = !state.soundEnabled;
-    localStorage.setItem('kikochat-sound', state.soundEnabled);
+    sessionStorage.setItem('kikochat-sound', state.soundEnabled);
     elements.soundToggle.innerHTML = state.soundEnabled ? 
       '<i class="fas fa-volume-up"></i>' : '<i class="fas fa-volume-mute"></i>';
     showNotification(`Sound ${state.soundEnabled ? 'enabled' : 'disabled'}`, 'info');
@@ -978,7 +978,7 @@ async function login(username, password) {
     }
 
     const user = { name: key, role: userData.role };
-    localStorage.setItem("kikochat_user", JSON.stringify(user));
+    sessionStorage.setItem("kikochat_user", JSON.stringify(user));
     initChatUI(user);
   } catch (error) {
     showNotification("Login failed", 'error');
@@ -988,7 +988,7 @@ async function login(username, password) {
 }
 
 function logout() {
-  localStorage.clear();
+  sessionStorage.clear();
   location.reload();
 }
 
@@ -1056,13 +1056,13 @@ window.addEventListener("load", () => {
   bindEvents();
 
   // Check for stored user session
-  const storedUser = localStorage.getItem("kikochat_user");
+  const storedUser = sessionStorage.getItem("kikochat_user");
   if (storedUser) {
     try {
       const user = JSON.parse(storedUser);
       initChatUI(user);
     } catch (error) {
-      localStorage.clear();
+      sessionStorage.clear();
     }
   }
 });
@@ -1080,6 +1080,10 @@ window.KikoChat = {
   toggleReaction
 };
 
+
+window.addEventListener("beforeunload", () => {
+  sessionStorage.clear();
+});
 </script>
 
 <style>
